@@ -1,0 +1,81 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Hide sublime text stuff
+*.sublime-project
+*.sublime-workspace
+
+# Intellij Idea
+.idea
+
+# Vim
+*.swp
+
+# Hide some OS X stuff
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+
+# Thumbnails
+._*
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Translations
+*.mo
+*.pot
+
+# pyenv
+.python-version
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+venv-*/
+
+# mypy
+.mypy_cache/
+
+.pioenvs
+.piolibdeps
+.pio
+.vscode/
+!.vscode/tasks.json
+CMakeListsPrivate.txt
+CMakeLists.txt
+
+# Red Reactor
+redreactor.log
+database.db

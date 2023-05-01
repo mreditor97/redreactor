@@ -1,0 +1,40 @@
+# Red Reactor MQTT Configuration file
+
+# MQTT Configuration
+mqtt:
+  broker: 127.0.0.1 # MQTT Broker Address
+  port: 1883 # MQTT Port
+  user: testing # MQTT Broker username
+  password: testing # MQTT Broker password
+  version: 5 # MQTT Version 5 or 3
+
+  client_id: Red Reactor # Connection Client ID - Defaults to Red Reactor
+
+  base_topic: redreactor # Red Reactor base publish topic
+  topic:
+    state: state # Main data push topic
+    status: status # Status topic
+    set: set # Command topic
+
+  exit_on_fail: true # Close on MQTT setup failure
+
+# Hostname Configuration
+hostname:
+  name: redreactor-pi
+  pretty: Red Reactor PI
+
+# Home Assistant Configuration
+homeassistant:
+  discovery: true # Enable Home Assistant autodiscovery
+  topic: homeassistant # Home Assistant discovery topic
+  discovery_interval: 120 # Discovery configuration push interval
+  expire_after: 120 # Adds a MQTT expire time to data received by Home Assistant
+
+# System Commands
+system:
+  shutdown: sudo shutdown 0 -h
+  restart: sudo shutdown 0 -r
+
+# Logging Levels
+log_level_console: DEBUG
+log_level_file: INFO
