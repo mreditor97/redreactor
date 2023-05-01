@@ -36,5 +36,6 @@ system:
   restart: sudo shutdown 0 -r
 
 # Logging Levels
-log_level_console: DEBUG
-log_level_file: INFO
+logging:
+  console: DEBUG
+  file: INFO

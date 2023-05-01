@@ -22,6 +22,13 @@ parser.add_argument(
     help="Database for storing latest dynamic configuration options",
     dest="database_file",
 )
+parser.add_argument(
+    "-l",
+    "--log",
+    default="redreactor.log",
+    help="Logging file location",
+    dest="logging_file",
+)
 args = parser.parse_args()
 
 
@@ -30,11 +37,11 @@ def main():
     logger = logging.getLogger("Red Reactor")
     # Set to stop INA219 logging
     logger.propagate = False
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.INFO)
 
     # Create handlers
     c_handler = logging.StreamHandler()
-    f_handler = logging.FileHandler("redreactor.log")
+    f_handler = logging.FileHandler(args.logging_file)
 
     # Create formatters and add it to handlers
     c_format = logging.Formatter(
@@ -62,18 +69,14 @@ def main():
 
     # Update logging levels, limited to listed set
     logging_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-    if "log_level_console" in configuration.static.keys():
-        if configuration.static["log_level_console"] in logging_levels:
-            c_handler.setLevel(configuration.static["log_level_console"])
-            logger.info(
-                f"Console log level set to {configuration.static['log_level_console']}"
-            )
-    if "log_level_file" in configuration.static.keys():
-        if configuration.static["log_level_file"] in logging_levels:
-            f_handler.setLevel(configuration.static["log_level_file"])
-            logger.info(
-                f"File log level set to {configuration.static['log_level_file']}"
-            )
+    if configuration.static["logging"]["console"] in logging_levels:
+        c_handler.setLevel(configuration.static["logging"]["console"])
+        logger.info(
+            f"Console log level set to {configuration.static['logging']['console']}"
+        )
+    if configuration.static["logging"]["file"] in logging_levels:
+        f_handler.setLevel(configuration.static["logging"]["file"])
+        logger.info(f"File log level set to {configuration.static['logging']['file']}")
 
     # Setup MQTT Connection
     mqtt = MQTT(
