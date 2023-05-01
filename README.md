@@ -51,8 +51,8 @@ Topic `redreactor/your-configured-hostname/state`
 - `current` is the Current draw from the batteries
 - `battery_level` is the percentage value of charge left in the batteries
 - `external_power` is whether the batteries are connected to an external power source or not
-- `cpu_temperature` read via `vcgencmd measure_temp` retrieves the CPU Temperature
-- `cpu_stat` read via `vcgencmd get_throttled` retrieves the CPU Stat
+- `cpu_temperature` read via `cat /sys/class/thermal/thermal_zone0/temp` gets the CPU Temperature
+- `cpu_stat` read via `cat /sys/devices/platform/soc/soc:firmware/get_throttled` gets the CPU Stat
 - `battery_warning_threshold` is a percentage value below 100% that once crossed will initiate a safe shutdown of the device
 - `battery_voltage_minimum` is the voltage at which is to be considered the lowest allowable before initiating a safe shutdown
 - `battery_voltage_maximum` is the voltage at which is to be considered the maximum at which the battery can be (this is used in the calculation of the `battery_level`)
