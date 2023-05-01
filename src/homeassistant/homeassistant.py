@@ -143,7 +143,7 @@ class Homeassistant:
     def _update_homeassistant_configuration(self):
         """Push Home Assistant configuration for auto discovery"""
 
-        self.logger.info(
+        self.logger.debug(
             "Publishing Homeassistant MQTT configuration / discovery information"
         )
 

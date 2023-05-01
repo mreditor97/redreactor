@@ -190,26 +190,25 @@ class Monitor:
         # Force a update of the dynamic configuration values
         self._update_dynamic_configuration()
 
-        # Read data from vcgencmd
+        # Read data from Kernel endpoints
         try:
-            cpu_data = subprocess.Popen(
-                ["vcgencmd", "get_throttled"], stdout=subprocess.PIPE
+            cpu_temperature = subprocess.Popen(
+                ["cat", "/sys/class/thermal/thermal_zone0/temp"], stdout=subprocess.PIPE
             )
-            cpu_data = cpu_data.communicate()
-            self.data.cpu_stat = int(cpu_data[0].decode().split("=")[1], 16)
-            cpu_data = subprocess.Popen(
-                ["vcgencmd", "measure_temp"], stdout=subprocess.PIPE
+            cpu_temperature = cpu_temperature.communicate()
+            self.data.cpu_temperature = float(cpu_temperature[0].decode()) * 0.001
+
+            cpu_stat = subprocess.Popen(
+                ["cat", "/sys/devices/platform/soc/soc:firmware/get_throttled"],
+                stdout=subprocess.PIPE,
             )
-            cpu_data = cpu_data.communicate()
-            self.data.cpu_temperature = float(
-                cpu_data[0].decode().split("=")[1].replace("'C", "")
-            )
+            cpu_stat = cpu_stat.communicate()
+            self.data.cpu_stat = int(cpu_stat[0].decode())
         except (OSError, IndexError, ValueError):
             # Failed to extract info
-            self.logger.error("Failed to read CPU info")
-            # Set top bit (19:0 = normal data)
-            self.data.cpu_stat = 2**20
-            self.data.cpu_temperature = 0
+            self.logger.error("Failed to read CPU Information")
+            self.data.cpu_stat = None
+            self.data.cpu_temperature = None
 
         # Publish heartbeat to status endpoint
         MQTT.event.emit(
@@ -233,7 +232,9 @@ class Monitor:
                         ),
                         f"{self._static_configuration['fields']['battery_level']['name']}": self.data.battery_level,
                         f"{self._static_configuration['fields']['external_power']['name']}": f"{self._static_configuration['fields']['external_power'].get('payload_on', 'ON') if self.data.external_power else self._static_configuration['fields']['external_power'].get('payload_off', 'OFF')}",
-                        f"{self._static_configuration['fields']['cpu_temperature']['name']}": self.data.cpu_temperature,
+                        f"{self._static_configuration['fields']['cpu_temperature']['name']}": round(
+                            self.data.cpu_temperature, 3
+                        ),
                         f"{self._static_configuration['fields']['cpu_stat']['name']}": self.data.cpu_stat,
                         f"{self._static_configuration['fields']['battery_warning_threshold']['name']}": self.data.battery_warning_threshold,
                         f"{self._static_configuration['fields']['battery_voltage_minimum']['name']}": self.data.battery_voltage_minimum,

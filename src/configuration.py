@@ -145,6 +145,7 @@ class LinkedConfiguration:
                     "unit": "°C",
                     "device_class": "temperature",
                     "entity_category": "diagnostic",
+                    "suggested_display_precision": 2,
                 },
                 "cpu_stat": {
                     "name": "cpu_stat",
@@ -221,6 +222,10 @@ class LinkedConfiguration:
             "system": {
                 "shutdown": "sudo shutdown 0 -h",
                 "restart": "sudo shutdown 0 -r",
+            },
+            "logging": {
+                "console": "INFO",
+                "file": "WARNING",
             },
         }
 
