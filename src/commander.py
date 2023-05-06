@@ -52,7 +52,7 @@ class Commander:
                 "button",
             }:
                 self.logger.info(
-                    f"Subscribing to the {field} topic at: {self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['set']}/{self._static_configuration['fields'][field]['name']}"
+                    f"Subscribing to the {field} topic at: {self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['set']}/{self._static_configuration['fields'][field]['pretty']}"
                 )
 
                 # Subscribe to that specific topic
