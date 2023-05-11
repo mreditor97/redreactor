@@ -87,7 +87,7 @@ class Monitor:
         )
         self.monitor_timer.start()
 
-        # Configure the report timer, get's started on MQTT connect
+        # Configure the report timer, gets started on MQTT connect
         self.report_timer = RepeatTimer(
             self.data.report_interval,
             self._update,
@@ -96,7 +96,7 @@ class Monitor:
     def _monitor(self, ina: INA219):
         self.logger.debug("Monitoring thread has been started")
 
-        # Update the Dynamic Configuration to ensure the calculations will be based correctly off the changable values
+        # Update the Dynamic Configuration to ensure the calculations will be based correctly off the changeable values
         self._update_dynamic_configuration()
 
         shutdown: bool = False
