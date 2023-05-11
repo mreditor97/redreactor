@@ -4,7 +4,7 @@ This is a Red Reactor MQTT Client service that is designed to run as a backgroun
 
 Functionality includes:
 
-- Background application that continously monitors the battery status, and will safely shutdown if required
+- Background application that continuously monitors the battery status, and will safely shutdown if required
 - The configuration file can be used to override specific topics and entities
 - Connects to a MQTT broker, and publishes the service status, data and enables command topics
 - Published data includes:
