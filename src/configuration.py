@@ -1,39 +1,45 @@
+"""Configuration module.
+
+Contains the ability to read the static and dynamic configuration files.
+"""
 import json
 import os
 from typing import Any
-import yaml
-from events.emitter import EventEmitter
 
-from utils import dict_merge
+import yaml
 from const import (
-    DEFAULT_REPORT_INTERVAL,
-    DEFAULT_BATTERY_WARNING_THRESHOLD,
-    DEFAULT_BATTERY_VOLTAGE_MINIMUM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
+    DEFAULT_BATTERY_VOLTAGE_MINIMUM,
+    DEFAULT_BATTERY_WARNING_THRESHOLD,
     DEFAULT_INA_I2C_ADDRESS,
-    DEFAULT_INA_SHUNT_OHMS,
     DEFAULT_INA_MAX_EXPECTED_AMPS,
     DEFAULT_INA_MONITOR_INTERVAL,
+    DEFAULT_INA_SHUNT_OHMS,
+    DEFAULT_REPORT_INTERVAL,
 )
+from helpers.emitter import EventEmitter
+from helpers.utils import dict_merge
 
 
 class DynamicConfiguration:
+    """Dynamic Configuration object."""
+
     data: dict[str, Any]
 
     event: EventEmitter = EventEmitter()
 
     _dynamic_file: str
 
-    def __init__(self, dynamic_file: str):
+    def __init__(self, dynamic_file: str) -> None:
+        """Initialise the Dynamic Configuration object."""
         self._dynamic_file = dynamic_file
 
         self.data = self._load()
 
         self.event.on(event_name="write", function=self.write)
 
-    def _load(self):
-        """Load dynamic configuration file"""
-
+    def _load(self) -> Any:
+        """Load dynamic configuration file."""
         dynamic_file_defaults = {
             "report_interval": DEFAULT_REPORT_INTERVAL,
             "battery_warning_threshold": DEFAULT_BATTERY_WARNING_THRESHOLD,
@@ -41,39 +47,44 @@ class DynamicConfiguration:
             "battery_voltage_maximum": DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
         }
 
-        if not os.path.exists(self._dynamic_file):
-            with open(self._dynamic_file, "w") as file:
+        if not os.path.exists(self._dynamic_file):  # noqa: PTH110
+            with open(self._dynamic_file, "w") as file:  # noqa: PTH123
                 json.dump(dynamic_file_defaults, file)
 
-        with open(self._dynamic_file, "r") as file:
+        with open(self._dynamic_file) as file:  # noqa: PTH123
             dynamic_file_override = json.load(file)
 
         return {**dynamic_file_defaults, **dynamic_file_override}
 
-    def write(self):
-        """Write dynamic configuration file"""
-
-        with open(self._dynamic_file, "w") as file:
+    def write(self) -> None:
+        """Write dynamic configuration file."""
+        with open(self._dynamic_file, "w") as file:  # noqa: PTH123
             json.dump(self.data, file)
 
 
 class LinkedConfiguration:
+    """Linked Configuration.
+
+    A connection between both Dynamic and Static configurations.
+    """
+
     static: dict[str, Any]
     dynamic: DynamicConfiguration
 
     _static_file: str
     _dynamic_file: str
 
-    def __init__(self, static_file: str, dynamic_file: str):
+    def __init__(self, static_file: str, dynamic_file: str) -> None:
+        """Initialise Linked Configuration object."""
         self._static_file = static_file
         self._dynamic_file = dynamic_file
 
         self.static = self._load()
         self.dynamic = DynamicConfiguration(self._dynamic_file)
 
-    def _load(self):
+    def _load(self) -> None:
         """Load static configuration file, and override defaults."""
-        with open(self._static_file, "r") as static_file:
+        with open(self._static_file) as static_file:  # noqa: PTH123
             static_file_override = yaml.safe_load(static_file)
 
         static_file_defaults = {
@@ -104,8 +115,6 @@ class LinkedConfiguration:
             "status": {
                 "online": "online",
                 "offline": "offline",
-                # "startup_error": "RED_REACTOR_STARTUP_ERROR",
-                # "current_range_error": "RED_REACTOR_CURRENT_RANGE_ERROR",
             },
             "fields": {
                 "voltage": {
@@ -229,5 +238,6 @@ class LinkedConfiguration:
             },
         }
 
+        # Overwritten any different values with the ones that came from the static file
         dict_merge(static_file_defaults, static_file_override)
-        return static_file_defaults  # Overwritten any different values with the ones that came from the static file
+        return static_file_defaults

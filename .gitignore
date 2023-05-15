@@ -65,6 +65,18 @@ env.bak/
 venv.bak/
 venv-*/
 
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*,cover
+.hypothesis/
+.pytest_cache/
+
 # mypy
 .mypy_cache/
 
@@ -75,6 +87,9 @@ venv-*/
 !.vscode/tasks.json
 CMakeListsPrivate.txt
 CMakeLists.txt
+
+# Ruff
+.ruff_cache/
 
 # Red Reactor
 redreactor.log

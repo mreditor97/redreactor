@@ -1,4 +1,9 @@
+"""Monitor Data file."""
+
+
 class MonitorData(dict):
+    """Monitor Data."""
+
     voltage: float | None
     current: float | None
     battery_level: float | None
@@ -10,7 +15,7 @@ class MonitorData(dict):
     battery_voltage_maximum: float | None
     report_interval: int | None
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         voltage: float | None = None,
         current: float | None = None,
@@ -22,7 +27,8 @@ class MonitorData(dict):
         battery_voltage_minimum: float | None = None,
         battery_voltage_maximum: float | None = None,
         report_interval: int | None = None,
-    ):
+    ) -> None:
+        """Initialise Monitor Data."""
         self.voltage = voltage
         self.current = current
         self.battery_level = battery_level
