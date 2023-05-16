@@ -1,0 +1,172 @@
+---
+name: Release
+
+concurrency:
+  group: queue
+
+# yamllint disable-line rule:truthy
+on:
+  release:
+    types:
+      - published
+  workflow_run:
+    workflows: ['CI']
+    branches: ['master']
+    types:
+      - completed
+
+jobs:
+  information:
+    if: |
+      github.event_name == 'release'
+      || (
+        github.event_name == 'workflow_run'
+        && github.event.workflow_run.conclusion == 'success'
+      )
+    name: ℹ️ Gather add-on information
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.release.outputs.environment}}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@v3
+      - name: ℹ️ Gather version and environment
+        id: release
+        run: |
+          sha="${{ github.sha }}"
+          environment="edge"
+          version="${sha:0:7}"
+          if [[ "${{ github.event_name }}" = "release" ]]; then
+            version="${{ github.event.release.tag_name }}"
+            version="${version,,}"
+            version="${version#v}"
+            environment="stable"
+            if [[ "${{ github.event.release.prerelease }}" = "true" ]]; then
+              environment="beta"
+            fi
+          fi
+
+          echo "environment=${environment}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: 👷 Build & Release
+    needs: information
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@v3
+      - name: 🏗 Set up Python 3.10
+        id: python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.10
+      - name: 🏗 Get pip cache dir
+        id: pip-cache
+        run: |
+          echo "::set-output name=dir::$(pip cache dir)"
+      - name: ⤵️ Restore cached Python PIP packages
+        uses: actions/cache@v3
+        # yamllint disable rule:line-length
+        with:
+          path: ${{ steps.pip-cache.outputs.dir }}
+          key: pip-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ hashFiles('extras/requirements.txt') }}
+          restore-keys: |
+            pip-${{ runner.os }}-${{ steps.python.outputs.python-version }}-
+      - name: 🏗 Install workflow dependencies
+        run: |
+          pip install -r extras/requirements.txt
+          poetry config virtualenvs.create true
+          poetry config virtualenvs.in-project true
+      - name: ⤵️ Restore cached Python virtual environment
+        id: cached-poetry-dependencies
+        uses: actions/cache@v3
+        with:
+          path: .venv
+          key: >-
+            venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ hashFiles('poetry.lock') }}
+            venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-
+      - name: 🏗 Install dependencies
+        run: poetry install --no-interaction
+      - name: 🏗 Set package version
+        run: |
+          version="${{ github.event.release.tag_name }}"
+          version="${version,,}"
+          version="${version#v}"
+          poetry version --no-interaction "${version}"
+      - name: 🏗 Build package
+        run: poetry build --no-interaction
+
+  publish-edge:
+    name: 📢 Publish edge version to Red Reactor Add-on repository
+    if: needs.information.outputs.environment == 'edge'
+    needs:
+      - information
+      - release
+    environment:
+      name: ${{ needs.information.outputs.environment }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🚀 Dispatch Red Reactor Add-on update signal
+        uses: peter-evans/repository-dispatch@v2.1.1
+        with:
+          token: ${{ secrets.DISPATCH_TOKEN }}
+          repository: ${{ github.repository_owner }}/addon-redreactor
+          event-type: update
+          client-payload: >
+            {
+              "name": "redreactor",
+              "repository": "${{ github.repository }}",
+              "version": "${{ needs.information.outputs.version }}"
+              "environment": "${{ needs.information.outputs.environment }}"
+            }
+
+  publish-beta:
+    name: 📢 Publish beta version to Red Reactor Add-on repository
+    if: needs.information.outputs.environment == 'beta' ||
+      needs.information.outputs.environment == 'stable'
+    needs:
+      - information
+      - release
+    environment:
+      name: ${{ needs.information.outputs.environment }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🚀 Dispatch Red Reactor Add-on update signal
+        uses: peter-evans/repository-dispatch@v2.1.1
+        with:
+          token: ${{ secrets.DISPATCH_TOKEN }}
+          repository: ${{ github.repository_owner }}/addon-redreactor
+          event-type: update
+          client-payload: >
+            {
+              "name": "redreactor",
+              "repository": "${{ github.repository }}",
+              "version": "${{ needs.information.outputs.version }}"
+              "environment": "${{ needs.information.outputs.environment }}"
+            }
+
+  publish-stable:
+    name: 📢 Publish stable version to Red Reactor Add-on repository
+    if: needs.information.outputs.environment == 'stable'
+    needs:
+      - information
+      - release
+    environment:
+      name: ${{ needs.information.outputs.environment }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🚀 Dispatch Red Reactor Add-on update signal
+        uses: peter-evans/repository-dispatch@v2.1.1
+        with:
+          token: ${{ secrets.DISPATCH_TOKEN }}
+          repository: ${{ github.repository_owner }}/addon-redreactor
+          event-type: update
+          client-payload: >
+            {
+              "name": "redreactor",
+              "repository": "${{ github.repository }}",
+              "version": "${{ needs.information.outputs.version }}"
+              "environment": "${{ needs.information.outputs.environment }}"
+            }
