@@ -82,7 +82,7 @@ class LinkedConfiguration:
         self.static = self._load()
         self.dynamic = DynamicConfiguration(self._dynamic_file)
 
-    def _load(self) -> None:
+    def _load(self) -> dict[str, Any]:
         """Load static configuration file, and override defaults."""
         with open(self._static_file) as static_file:  # noqa: PTH123
             static_file_override = yaml.safe_load(static_file)

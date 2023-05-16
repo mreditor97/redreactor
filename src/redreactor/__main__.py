@@ -2,15 +2,13 @@
 
 import argparse
 import logging
-import sys
 
 from components.commander import Commander
 from components.homeassistant import Homeassistant
 from components.monitor import Monitor
 from components.mqtt import MQTT
 from configuration import LinkedConfiguration
-
-from .const import __version__
+from const import __version__
 
 
 def get_arguments() -> argparse.Namespace:
@@ -41,7 +39,7 @@ def get_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> int:
+def main() -> None:
     """Start Red Reactor Battery Monitor service."""
     args = get_arguments()
 
@@ -119,4 +117,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

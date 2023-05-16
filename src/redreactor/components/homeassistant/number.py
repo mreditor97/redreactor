@@ -27,7 +27,7 @@ class Number(Base):
         step: float | None = None,
         optimistic: bool | None = None,
         unit_of_measurement: str | None = None,
-        **kwargs: dict[str, Any],
+        **kwargs: Any,
     ) -> None:
         """Initialise Home Assistant number."""
         super().__init__(**kwargs)

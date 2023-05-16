@@ -15,7 +15,7 @@ class BinarySensor(Base):
         self,
         payload_on: str | None = None,
         payload_off: str | None = None,
-        **kwargs: dict[str, Any],
+        **kwargs: Any,
     ) -> None:
         """Initialise Home Assistant Binary Sensor."""
         super().__init__(**kwargs)

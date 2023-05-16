@@ -17,7 +17,7 @@ class Button(Base):
         command_topic: str | None = None,
         command_template: str | None = None,
         payload_press: str | None = None,
-        **kwargs: dict[str, Any],
+        **kwargs: Any,
     ) -> None:
         """Initialise Home Assistant button."""
         super().__init__(**kwargs)

@@ -42,7 +42,7 @@ class Monitor:
         battery_level=100,
         external_power=True,
         cpu_temperature=0.0,
-        cpu_stat=0.0,
+        cpu_stat=0,
         battery_warning_threshold=DEFAULT_BATTERY_WARNING_THRESHOLD,
         battery_voltage_minimum=DEFAULT_BATTERY_VOLTAGE_MINIMUM,
         battery_voltage_maximum=DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
@@ -50,8 +50,8 @@ class Monitor:
     )
 
     # Timers
-    monitor_timer: RepeatTimer = None  # Runs Monitoring calculations
-    report_timer: RepeatTimer = None  # Pushes updates to MQTT
+    monitor_timer: RepeatTimer  # Runs Monitoring calculations
+    report_timer: RepeatTimer  # Pushes updates to MQTT
 
     def __init__(
         self,
@@ -74,7 +74,7 @@ class Monitor:
         self._update_dynamic_configuration()
 
         # Setup the INA219
-        ina: INA219 = None
+        ina: INA219 | None = None
         try:
             ina = INA219(
                 shunt_ohms=static_configuration["ina"]["shunt_ohms"],
@@ -131,7 +131,7 @@ class Monitor:
 
                 MQTT.event.emit(
                     event_name="publish",
-                    topic=f"{self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['status']}",
+                    topic=f"{self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['status']}",  # noqa: E501
                     payload=f"{self._static_configuration['status']['offline']}",
                 )
             except ZeroDivisionError:
@@ -159,13 +159,13 @@ class Monitor:
                         self._update()
 
         if (
-            self.data.battery_level <= self.data.battery_warning_threshold
+            self.data.battery_level <= float(self.data.battery_warning_threshold)
             and not self.data.external_power
         ):
             # Force immediate publish update at warning level
             self._update()
 
-        if self.data.battery_level == 0 and not self.data.external_power:
+        if self.data.battery_level == 0.0 and not self.data.external_power:
             shutdown = True
 
         if self.data.voltage > self.data.battery_voltage_maximum + 0.05:
@@ -212,8 +212,11 @@ class Monitor:
                 ["cat", "/sys/class/thermal/thermal_zone0/temp"],  # noqa: S603, S607
                 stdout=subprocess.PIPE,
             )
-            cpu_temperature = cpu_temperature.communicate()
-            self.data.cpu_temperature = float(cpu_temperature[0].decode()) * 0.001
+            result_cpu_temperature = cpu_temperature.communicate()
+            self.data.cpu_temperature = round(
+                float((result_cpu_temperature[0]).decode()) * 0.001,
+                2,
+            )
 
             cpu_stat = subprocess.Popen(
                 [  # noqa: S603, S607
@@ -222,8 +225,8 @@ class Monitor:
                 ],
                 stdout=subprocess.PIPE,
             )
-            cpu_stat = cpu_stat.communicate()
-            self.data.cpu_stat = int(cpu_stat[0].decode())
+            result_cpu_stat = cpu_stat.communicate()
+            self.data.cpu_stat = int(result_cpu_stat[0].decode())
         except (OSError, IndexError, ValueError):
             # Failed to extract info
             self.logger.exception("Failed to read CPU Information")
@@ -264,10 +267,7 @@ class Monitor:
                             "OFF",
                         ),
                     ),
-                    f"{self._static_configuration['fields']['cpu_temperature']['name']}": round(  # noqa: E501
-                        self.data.cpu_temperature,
-                        3,
-                    ),
+                    f"{self._static_configuration['fields']['cpu_temperature']['name']}": self.data.cpu_temperature,  # noqa: E501
                     f"{self._static_configuration['fields']['cpu_stat']['name']}": self.data.cpu_stat,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_warning_threshold']['name']}": self.data.battery_warning_threshold,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_voltage_minimum']['name']}": self.data.battery_voltage_minimum,  # noqa: E501
@@ -283,7 +283,7 @@ class Monitor:
         This uses a event hook back to the Dynamic Configuration to update the file.
         """
         # Update Battery Warning Threshold
-        self.data.battery_warning_threshold = float(
+        self.data.battery_warning_threshold = int(
             self._dynamic_configuration.data[
                 self._static_configuration["fields"]["battery_warning_threshold"][
                     "name"

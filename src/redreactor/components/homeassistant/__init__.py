@@ -20,7 +20,7 @@ class Homeassistant:
 
     logger = logging.getLogger("Red Reactor")
 
-    configuration: list[Sensor | Number | BinarySensor] = []
+    configuration: list[Sensor | Number | BinarySensor | Button] = []
 
     _static_configuration: dict[str, Any] = {}
     _dynamic_configuration: DynamicConfiguration
@@ -100,9 +100,9 @@ class Homeassistant:
                 device=configuration_defaults,
             )
 
-            configured: Sensor | BinarySensor | Number | Button | None = None
+            configured: Sensor | BinarySensor | Number | Button = Sensor()
             if field["type"] == "sensor":
-                configured: Sensor = Sensor(
+                configured = Sensor(
                     unit_of_measurement=field.get("unit", None),
                     suggested_display_precision=field.get(
                         "suggested_display_precision",
@@ -112,13 +112,13 @@ class Homeassistant:
                 )
 
             if field["type"] == "binary_sensor":
-                configured: BinarySensor = BinarySensor(
+                configured = BinarySensor(
                     payload_on=field.get("payload_on", "ON"),
                     payload_off=field.get("payload_off", "OFF"),
                 )
 
             if field["type"] == "number":
-                configured: Number = Number(
+                configured = Number(
                     command_topic=f"{static_configuration['mqtt']['base_topic']}/{static_configuration['hostname']['name']}/{static_configuration['mqtt']['topic']['set']}/{field['name']}",
                     command_template=f"{ '{{ value }}' }",
                     min=field.get("min", 0),
@@ -130,7 +130,7 @@ class Homeassistant:
                 )
 
             if field["type"] == "button":
-                configured: Button = Button(
+                configured = Button(
                     command_topic=f"{static_configuration['mqtt']['base_topic']}/{static_configuration['hostname']['name']}/{static_configuration['mqtt']['topic']['set']}/{field['name']}",
                     command_template=f"{ '{{ value }}' }",
                     payload_press=field.get(
@@ -140,7 +140,7 @@ class Homeassistant:
                 )
 
             # Merge the configurations
-            configured.__dict__.update(configuring.__dict__)
+            configured.__dict__ |= configuring.__dict__
 
             # Append the configuration to the configuration variable
             self.configuration.append(configured)

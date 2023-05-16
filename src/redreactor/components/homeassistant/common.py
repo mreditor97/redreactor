@@ -25,12 +25,12 @@ class Encoder(JSONEncoder):
     Allows the conversion of the Home Assistant object into JSON.
     """
 
-    def default(self, obj: Any) -> Any:
+    def default(self, o: Any) -> Any:
         """Encode object into JSON."""
-        if isinstance(obj, Device | Availability):
-            return {k: v for (k, v) in obj.__dict__.items() if v is not None}
+        if isinstance(o, Device | Availability):
+            return {k: v for (k, v) in o.__dict__.items() if v is not None}
 
-        return JSONEncoder.default(self, obj)
+        return JSONEncoder.default(self, o)
 
 
 # Home Assistant MQTT Availability topic
@@ -68,7 +68,7 @@ class Device(Representer):
     configuration_url: str | None
     connections: list[list[str]] | None  # [connection_type, connection_identifier]
     hw_version: str | None
-    identifiers: str | list | None
+    identifiers: str | list[str] | None
     manufacturer: str | None
     model: str | None
     name: str | None
@@ -81,7 +81,7 @@ class Device(Representer):
         configuration_url: str | None = None,
         connections: list[list[str]] | None = None,
         hw_version: str | None = None,
-        identifiers: str | list | None = None,
+        identifiers: str | list[str] | None = None,
         manufacturer: str | None = None,
         model: str | None = None,
         name: str | None = None,
@@ -118,7 +118,7 @@ class Base(Representer):
     icon: str | None
     object_id: str | None
     unique_id: str | None
-    state_topic: str
+    state_topic: str | None
     value_template: str | None
     availability: list[Availability] | None
     availability_mode: str | None

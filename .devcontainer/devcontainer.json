@@ -4,7 +4,7 @@
   },
   "customizations": {
     "codespaces": {
-      "openFiles": ["README.md", "src/redreactor/redreactor.py"]
+      "openFiles": ["README.md", "src/redreactor/__main__.py"]
     },
     "vscode": {
       "extensions": [
@@ -14,8 +14,7 @@
         "GitHub.vscode-pull-request-github",
         "charliermarsh.ruff",
         "GitHub.vscode-github-actions",
-        "ryanluker.vscode-coverage-gutters",
-        "ms-python.pylint"
+        "ryanluker.vscode-coverage-gutters"
       ],
       "settings": {
         "[python]": {
@@ -53,6 +52,6 @@
     }
   },
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
-  "name": "Red Reactor Development Container",
+  "name": "Red Reactor Battery Monitor service",
   "updateContentCommand": ". ${NVM_DIR}/nvm.sh && nvm install && nvm use && npm install && poetry install && poetry run pre-commit install"
 }

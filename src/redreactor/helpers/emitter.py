@@ -13,16 +13,22 @@ class EventEmitter:
 
     def __init__(self) -> None:
         """Initialise Event Emitter."""
-        self.__callbacks: dict[str, callable] = {}
+        self.__callbacks: Any = {}
 
-    def on(self, event_name: str, function: Any) -> None:
-        """Register event."""
+    def on(self, event_name: str, function: Any) -> Any:
+        """Register event to a specific item."""
         self.__callbacks[event_name] = [*self.__callbacks.get(event_name, []), function]
         return function
 
-    def emit(self, event_name: str, *args: tuple, **kwargs: dict[str, Any]) -> Any:
+    def emit(
+        self,
+        event_name: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         """Event trigger."""
-        [function(*args, **kwargs) for function in self.__callbacks.get(event_name, [])]
+        for function in self.__callbacks.get(event_name, []):
+            function(*args, **kwargs)
 
     def off(self, event_name: str, function: Any) -> None:
         """Event stop."""

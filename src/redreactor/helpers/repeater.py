@@ -7,7 +7,7 @@ from typing import Any
 class RepeatTimer:
     """Repeat Timer."""
 
-    _timer: Timer | None
+    _timer: Timer
 
     interval: float
     function: Any
@@ -19,11 +19,10 @@ class RepeatTimer:
         self,
         interval: float,
         function: Any,
-        *args: tuple,
-        **kwargs: dict[str, Any],
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         """Initialise Repeat Timer object."""
-        self._timer = None
         self.interval = interval
         self.function = function
         self.args = args
