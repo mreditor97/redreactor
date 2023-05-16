@@ -130,7 +130,7 @@ jobs:
         run: poetry run pre-commit run trailing-whitespace --all-files
 
   mypy:
-    name: MYPY
+    name: MyPy
     runs-on: ubuntu-latest
     steps:
       - name: ⤵️ Check out code from GitHub
