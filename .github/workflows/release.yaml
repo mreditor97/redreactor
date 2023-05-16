@@ -57,6 +57,8 @@ jobs:
     steps:
       - name: ⤵️ Check out code from GitHub
         uses: actions/checkout@v3
+      - name: 🏗 Set up Poetry
+        run: pipx install poetry
       - name: 🏗 Set up Python 3.10
         id: python
         uses: actions/setup-python@v4
