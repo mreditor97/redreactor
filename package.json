@@ -1,0 +1,14 @@
+{
+  "name": "redreactor",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Red Reactor Battery Monitoring service",
+  "scripts": {
+    "prettier": "prettier --write **/*.{json,js,md,yml,yaml} *.{json,js,md,yml,yaml}"
+  },
+  "author": "MrEditor97 <info@mreditor97.co.uk>",
+  "license": "MIT",
+  "devDependencies": {
+    "prettier": "2.8.8"
+  }
+}

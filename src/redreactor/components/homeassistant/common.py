@@ -1,26 +1,46 @@
+"""Home Assistant Common."""
+
 from json import JSONEncoder
+from typing import Any
 
 
 # Home Assistant MQTT Representer object
 # Enabled the printing into a dict and to JSON
-class Representer(object):
+class Representer:
+    """Representer.
+
+    Enables printing into a dict and to JSON.
+    """
+
     def __repr__(self) -> str:
-        return repr(dict({k: v for (k, v) in self.__dict__.items() if v is not None}))
+        """Return Represent."""
+        return repr({k: v for (k, v) in self.__dict__.items() if v is not None})
 
 
 # Home Assistant MQTT JSON Encoder
 # Allows the conversion of the Home Assistant objects to JSON
 class Encoder(JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, (Device, Availability)):
-            return dict({k: v for (k, v) in obj.__dict__.items() if v is not None})
+    """Encoder.
 
-        return JSONEncoder.default(self, obj)
+    Allows the conversion of the Home Assistant object into JSON.
+    """
+
+    def default(self, o: Any) -> Any:
+        """Encode object into JSON."""
+        if isinstance(o, Device | Availability):
+            return {k: v for (k, v) in o.__dict__.items() if v is not None}
+
+        return JSONEncoder.default(self, o)
 
 
 # Home Assistant MQTT Availability topic
 # Topic to subscribe to receive availability updates
 class Availability(Representer):
+    """Availability.
+
+    Adds Home Assistant MQTT Availability support.
+    """
+
     topic: str
     payload_available: str | None
     payload_not_available: str | None
@@ -30,22 +50,25 @@ class Availability(Representer):
         topic: str,
         payload_available: str | None = None,
         payload_not_available: str | None = None,
-    ):
+    ) -> None:
+        """Initialise Home Assistant Availability object."""
         self.payload_available = payload_available
         self.payload_not_available = payload_not_available
         self.topic = topic
-
-    def __repr__(self) -> str:
-        return super().__repr__()
 
 
 # Home Assistant MQTT Device
 # Ties the device into the device registry within Home Assistant
 class Device(Representer):
+    """Device.
+
+    Adds support for Home Assistant device list.
+    """
+
     configuration_url: str | None
     connections: list[list[str]] | None  # [connection_type, connection_identifier]
     hw_version: str | None
-    identifiers: str | list | None
+    identifiers: str | list[str] | None
     manufacturer: str | None
     model: str | None
     name: str | None
@@ -53,19 +76,20 @@ class Device(Representer):
     sw_version: str | None
     via_device: str | None
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         configuration_url: str | None = None,
         connections: list[list[str]] | None = None,
         hw_version: str | None = None,
-        identifiers: str | list | None = None,
+        identifiers: str | list[str] | None = None,
         manufacturer: str | None = None,
         model: str | None = None,
         name: str | None = None,
         suggested_area: str | None = None,
         sw_version: str | None = None,
         via_device: str | None = None,
-    ):
+    ) -> None:
+        """Initialise Home Assistant Device object."""
         self.configuration_url = configuration_url
         self.connections = connections
         self.hw_version = hw_version
@@ -77,13 +101,15 @@ class Device(Representer):
         self.sw_version = sw_version
         self.via_device = via_device
 
-    def __repr__(self) -> str:
-        return super().__repr__()
-
 
 # Home Assistant MQTT Items
 # Standard options available on all MQTT inputs
 class Base(Representer):
+    """Base.
+
+    In all Home Assistant device types.
+    """
+
     name: str | None
     device_class: str | None
     state_class: str | None
@@ -92,15 +118,15 @@ class Base(Representer):
     icon: str | None
     object_id: str | None
     unique_id: str | None
-    state_topic: str
+    state_topic: str | None
     value_template: str | None
     availability: list[Availability] | None
     availability_mode: str | None
     device: Device | None
 
-    configuration_topic: str | None  # Used for one time creation of the Home Assistant configuration topic
+    configuration_topic: str | None  # Used for one time creation of the Home Assistant configuration topic # noqa: E501
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         name: str | None = None,
         device_class: str | None = None,
@@ -116,7 +142,8 @@ class Base(Representer):
         availability_mode: str | None = None,
         device: Device | None = None,
         configuration_topic: str | None = None,
-    ):
+    ) -> None:
+        """Initialise Home Assistant Base object."""
         self.name = name
         self.device_class = device_class
         self.state_class = state_class
@@ -132,6 +159,3 @@ class Base(Representer):
         self.device = device
 
         self.configuration_topic = configuration_topic
-
-    def __repr__(self) -> str:
-        return super().__repr__()

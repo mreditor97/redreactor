@@ -1,26 +1,28 @@
-import logging
+"""Home Assistant module."""
 import json
-
+import logging
 from typing import Any
+
+from components.mqtt import MQTT
+from configuration import DynamicConfiguration
+from helpers.repeater import RepeatTimer
 from paho.mqtt.client import Client
 
-from configuration import DynamicConfiguration
-from events.repeater import RepeatTimer
-from mqtt.mqtt import MQTT
-
-from .number import Number
-from .sensor import Sensor
 from .binary_sensor import BinarySensor
 from .button import Button
-from .common import Device, Availability, Base, Encoder
+from .common import Availability, Base, Device, Encoder
+from .number import Number
+from .sensor import Sensor
 
 
 class Homeassistant:
+    """Home Assistant integration."""
+
     logger = logging.getLogger("Red Reactor")
 
-    configuration: list[Sensor | Number | BinarySensor] = list()
+    configuration: list[Sensor | Number | BinarySensor | Button] = []
 
-    _static_configuration: dict[str, Any] = dict()
+    _static_configuration: dict[str, Any] = {}
     _dynamic_configuration: DynamicConfiguration
 
     configuration_report_timer: RepeatTimer
@@ -29,7 +31,8 @@ class Homeassistant:
         self,
         static_configuration: dict[str, Any],
         dynamic_configuration: DynamicConfiguration,
-    ):
+    ) -> None:
+        """Initialise Home Assistant integration object."""
         self._static_configuration = static_configuration
         self._dynamic_configuration = dynamic_configuration
 
@@ -40,7 +43,8 @@ class Homeassistant:
 
         # Register Dynamic Configuration update listener
         self._dynamic_configuration.event.on(
-            event_name="write", function=self._update_homeassistant_timer
+            event_name="write",
+            function=self._update_homeassistant_timer,
         )
 
         # Push a configuration update at a repeated interval
@@ -48,7 +52,7 @@ class Homeassistant:
             float(
                 self._dynamic_configuration.data[
                     self._static_configuration["fields"]["report_interval"]["name"]
-                ]
+                ],
             )
             * 4,
             self._update_homeassistant_configuration,
@@ -56,7 +60,8 @@ class Homeassistant:
 
         self.logger.info("Home Assistant support has been enabled")
 
-    def _process_homeassistant_configuration(self, static_configuration):
+    def _process_homeassistant_configuration(self, static_configuration: Any) -> None:
+        """Process Home Assistant configuration."""
         configuration_defaults: Device = Device(
             identifiers=f"redreactor_{static_configuration['hostname']['name']}",
             name=f"Red Reactor {static_configuration['hostname']['pretty']}",
@@ -66,8 +71,8 @@ class Homeassistant:
             sw_version="1.0.0",
         )
 
-        for field in static_configuration["fields"].keys():
-            field = static_configuration["fields"][field]
+        for field in static_configuration["fields"]:
+            field = static_configuration["fields"][field]  # noqa: PLW2901
 
             configuring: Base = Base(
                 name=f"{configuration_defaults.name} {field.get('pretty')}",
@@ -80,43 +85,42 @@ class Homeassistant:
                 unique_id=f"{configuration_defaults.identifiers}_{field['name']}",
                 state_topic=f"{static_configuration['mqtt']['base_topic']}/{static_configuration['hostname']['name']}/{static_configuration['mqtt']['topic']['state']}",
                 configuration_topic=f"{static_configuration['homeassistant']['topic']}/{field['type']}/{configuration_defaults.identifiers}_{field['name']}/config",
-                availability=list(
-                    [
-                        Availability(
-                            topic=f"{static_configuration['mqtt']['base_topic']}/{static_configuration['hostname']['name']}/{static_configuration['mqtt']['topic']['status']}",
-                            payload_available=f"{static_configuration['status']['online']}",
-                            payload_not_available=f"{static_configuration['status']['offline']}",
-                        )
-                    ]
-                ),
+                availability=[
+                    Availability(
+                        topic=f"{static_configuration['mqtt']['base_topic']}/{static_configuration['hostname']['name']}/{static_configuration['mqtt']['topic']['status']}",
+                        payload_available=f"{static_configuration['status']['online']}",
+                        payload_not_available=f"{static_configuration['status']['offline']}",
+                    ),
+                ],
                 availability_mode=f"{field.get('availability_mode', 'all')}",
                 value_template=field.get(
                     "value_template",
-                    f"{ str('{{ value_json.') + str(field['name']) + str(' }}') }",
+                    f"{ '{{ value_json.' + str(field['name']) + ' }}' }",
                 ),
                 device=configuration_defaults,
             )
 
-            configured: Sensor | BinarySensor | Number | Button | None = None
+            configured: Sensor | BinarySensor | Number | Button = Sensor()
             if field["type"] == "sensor":
-                configured: Sensor = Sensor(
+                configured = Sensor(
                     unit_of_measurement=field.get("unit", None),
                     suggested_display_precision=field.get(
-                        "suggested_display_precision", None
+                        "suggested_display_precision",
+                        None,
                     ),
                     state_class=field.get("state_class", None),
                 )
 
             if field["type"] == "binary_sensor":
-                configured: BinarySensor = BinarySensor(
+                configured = BinarySensor(
                     payload_on=field.get("payload_on", "ON"),
                     payload_off=field.get("payload_off", "OFF"),
                 )
 
             if field["type"] == "number":
-                configured: Number = Number(
+                configured = Number(
                     command_topic=f"{static_configuration['mqtt']['base_topic']}/{static_configuration['hostname']['name']}/{static_configuration['mqtt']['topic']['set']}/{field['name']}",
-                    command_template=f"{ str('{{ value }}') }",
+                    command_template=f"{ '{{ value }}' }",
                     min=field.get("min", 0),
                     max=field.get("max", 300),
                     mode=field.get("mode", "auto"),
@@ -125,26 +129,26 @@ class Homeassistant:
                     unit_of_measurement=field.get("unit", None),
                 )
 
-                # self.logger.info(configured.command_template)
-
             if field["type"] == "button":
-                configured: Button = Button(
+                configured = Button(
                     command_topic=f"{static_configuration['mqtt']['base_topic']}/{static_configuration['hostname']['name']}/{static_configuration['mqtt']['topic']['set']}/{field['name']}",
-                    command_template=f"{ str('{{ value }}') }",
-                    payload_press=field.get("payload_press", json.dumps(True)),
+                    command_template=f"{ '{{ value }}' }",
+                    payload_press=field.get(
+                        "payload_press",
+                        json.dumps(True),  # noqa: FBT003
+                    ),
                 )
 
             # Merge the configurations
-            configured.__dict__.update(configuring.__dict__)
+            configured.__dict__ |= configuring.__dict__
 
             # Append the configuration to the configuration variable
             self.configuration.append(configured)
 
-    def _update_homeassistant_configuration(self):
-        """Push Home Assistant configuration for auto discovery"""
-
+    def _update_homeassistant_configuration(self) -> None:
+        """Push Home Assistant configuration for auto discovery."""
         self.logger.debug(
-            "Publishing Homeassistant MQTT configuration / discovery information"
+            "Publishing Homeassistant MQTT configuration / discovery information",
         )
 
         # Publish Home Assistant configuration for each field
@@ -153,21 +157,26 @@ class Homeassistant:
                 event_name="publish",
                 topic=field.configuration_topic,
                 payload=json.dumps(
-                    dict({k: v for (k, v) in field.__dict__.items() if v is not None}),
+                    {k: v for (k, v) in field.__dict__.items() if v is not None},
                     cls=Encoder,
                 ),
             )
 
-    def _update_homeassistant_timer(self):
-        """Update Home Assistant configuration update timer"""
-
+    def _update_homeassistant_timer(self) -> None:
+        """Update Home Assistant configuration update timer."""
         # Update configuration report interval timer
         self.configuration_report_timer.interval = float(
-            self._static_configuration["homeassistant"]["discovery_interval"]
+            self._static_configuration["homeassistant"]["discovery_interval"],
         )
 
-    def _mqtt_on_connect(self, client: Client, userdata, flags, rc, reasonCode=None):
-        """On MQTT Connect, publish Home Assistant configuration"""
-
+    def _mqtt_on_connect(  # noqa: PLR0913
+        self,
+        client: Client,  # noqa: ARG002
+        userdata: Any,  # noqa: ARG002
+        flags: Any,  # noqa: ARG002
+        rc: Any,  # noqa: ARG002
+        reasoncode: Any = None,  # noqa: ARG002
+    ) -> None:
+        """On MQTT Connect, publish Home Assistant configuration."""
         self._update_homeassistant_configuration()
         self.configuration_report_timer.start()

@@ -1,38 +1,48 @@
+"""Red Reactor bootstrap."""
+
 import argparse
 import logging
 
-from mqtt.mqtt import MQTT
-from homeassistant.homeassistant import Homeassistant
+from components.commander import Commander
+from components.homeassistant import Homeassistant
+from components.monitor import Monitor
+from components.mqtt import MQTT
 from configuration import LinkedConfiguration
-from commander import Commander
-from monitor.monitor import Monitor
-
-parser = argparse.ArgumentParser(description="Red Reactor MQTT Client")
-parser.add_argument(
-    "-c",
-    "--config",
-    default="config.yaml",
-    help="Configuration file, defaults to `config.yaml`",
-    dest="configuration_file",
-)
-parser.add_argument(
-    "-d",
-    "--database",
-    default="database.db",
-    help="Database for storing latest dynamic configuration options",
-    dest="database_file",
-)
-parser.add_argument(
-    "-l",
-    "--log",
-    default="redreactor.log",
-    help="Logging file location",
-    dest="logging_file",
-)
-args = parser.parse_args()
+from const import __version__
 
 
-def main():
+def get_arguments() -> argparse.Namespace:
+    """Get passed arguments parsed."""
+    parser = argparse.ArgumentParser(description="Red Reactor MQTT Client")
+    parser.add_argument(
+        "-c",
+        "--config",
+        default="config.yaml",
+        help="Configuration file, defaults to `config.yaml`",
+        dest="configuration_file",
+    )
+    parser.add_argument(
+        "-d",
+        "--database",
+        default="database.db",
+        help="Database for storing latest dynamic configuration options",
+        dest="database_file",
+    )
+    parser.add_argument(
+        "-l",
+        "--log",
+        default="redreactor.log",
+        help="Logging file location",
+        dest="logging_file",
+    )
+
+    return parser.parse_args()
+
+
+def main() -> None:
+    """Start Red Reactor Battery Monitor service."""
+    args = get_arguments()
+
     # Create logger, enable all msgs
     logger = logging.getLogger("Red Reactor")
     # Set to stop INA219 logging
@@ -45,7 +55,7 @@ def main():
 
     # Create formatters and add it to handlers
     c_format = logging.Formatter(
-        "%(name)s - %(filename)s - %(levelname)s - %(message)s"
+        "%(name)s - %(filename)s - %(levelname)s - %(message)s",
     )
     f_format = logging.Formatter(
         "%(asctime)s - %(filename)s - %(name)s - %(levelname)s - %(message)s",
@@ -58,11 +68,11 @@ def main():
     logger.addHandler(c_handler)
     logger.addHandler(f_handler)
 
-    logger.info("###############################")
-    logger.info("### Red Reactor MQTT Client ###")
-    logger.info("##### With Home Assistant #####")
-    logger.info(f"Loading in static configuration file: {args.configuration_file}")
-    logger.info(f"Loading in dynamic configuration file: {args.database_file}")
+    logger.info("########################################")
+    logger.info("#### Red Reactor MQTT Client (%s) ####", __version__)
+    logger.info("# With MQTT, and Home Assistant Support #")
+    logger.info("Loading in static configuration file: %s", args.configuration_file)
+    logger.info("Loading in dynamic configuration file: %s", args.database_file)
 
     # Load in configuration files
     configuration = LinkedConfiguration(args.configuration_file, args.database_file)
@@ -72,11 +82,15 @@ def main():
     if configuration.static["logging"]["console"] in logging_levels:
         c_handler.setLevel(configuration.static["logging"]["console"])
         logger.info(
-            f"Console log level set to {configuration.static['logging']['console']}"
+            "Console log level set to %s",
+            configuration.static["logging"]["console"],
         )
     if configuration.static["logging"]["file"] in logging_levels:
         f_handler.setLevel(configuration.static["logging"]["file"])
-        logger.info(f"File log level set to {configuration.static['logging']['file']}")
+        logger.info(
+            "File log level set to %s",
+            configuration.static["logging"]["file"],
+        )
 
     # Setup MQTT Connection
     mqtt = MQTT(
@@ -88,11 +102,11 @@ def main():
     monitor = Monitor(configuration.static, configuration.dynamic)
 
     # Setup MQTT Commander and Battery Shutdown / Reboot commands
-    commander = Commander(configuration.static, configuration.dynamic, monitor)
+    Commander(configuration.static, configuration.dynamic, monitor)
 
     # Create Home Assistant data if enabled
     if bool(configuration.static["homeassistant"]["discovery"]):
-        homeassistant = Homeassistant(configuration.static, configuration.dynamic)
+        Homeassistant(configuration.static, configuration.dynamic)
 
     # Connect to MQTT server and loop forever
     mqtt.connect(

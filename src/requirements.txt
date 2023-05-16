@@ -1,3 +1,0 @@
-pi-ina219
-paho-mqtt
-pyyaml
