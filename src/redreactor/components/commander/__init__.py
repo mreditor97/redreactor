@@ -10,10 +10,10 @@ import time
 from datetime import datetime
 from typing import Any, Literal
 
-from paho.mqtt.client import Client
+from paho.mqtt.client import Client, MQTTMessage
 
 from redreactor.components.monitor import Monitor
-from redreactor.components.mqtt import MQTT, MQTTMessage
+from redreactor.components.mqtt import MQTT
 from redreactor.configuration import DynamicConfiguration
 from redreactor.helpers.emitter import EventEmitter
 
