@@ -3,12 +3,12 @@
 import argparse
 import logging
 
-from components.commander import Commander
-from components.homeassistant import Homeassistant
-from components.monitor import Monitor
-from components.mqtt import MQTT
-from configuration import LinkedConfiguration
-from const import __version__
+from redreactor.components.commander import Commander
+from redreactor.components.homeassistant import Homeassistant
+from redreactor.components.monitor import Monitor
+from redreactor.components.mqtt import MQTT
+from redreactor.configuration import LinkedConfiguration
+from redreactor.const import __version__
 
 
 def get_arguments() -> argparse.Namespace:

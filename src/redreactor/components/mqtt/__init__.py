@@ -7,8 +7,9 @@ import socket
 import sys
 from typing import Any
 
-from helpers.emitter import EventEmitter
 from paho.mqtt.client import Client, MQTTMessage, MQTTv5, MQTTv311
+
+from redreactor.helpers.emitter import EventEmitter
 
 
 class MQTT:

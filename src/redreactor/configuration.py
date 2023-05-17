@@ -7,7 +7,8 @@ import os
 from typing import Any
 
 import yaml
-from const import (
+
+from redreactor.const import (
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MINIMUM,
     DEFAULT_BATTERY_WARNING_THRESHOLD,
@@ -17,8 +18,8 @@ from const import (
     DEFAULT_INA_SHUNT_OHMS,
     DEFAULT_REPORT_INTERVAL,
 )
-from helpers.emitter import EventEmitter
-from helpers.utils import dict_merge
+from redreactor.helpers.emitter import EventEmitter
+from redreactor.helpers.utils import dict_merge
 
 
 class DynamicConfiguration:
