@@ -55,10 +55,10 @@ def main() -> None:
 
     # Create formatters and add it to handlers
     c_format = logging.Formatter(
-        "%(name)s - %(filename)s - %(levelname)s - %(message)s",
+        "%(asctime)s - %(filename)s - %(levelname)s - %(message)s",
     )
     f_format = logging.Formatter(
-        "%(asctime)s - %(filename)s - %(name)s - %(levelname)s - %(message)s",
+        "%(asctime)s - %(filename)s - %(levelname)s - %(message)s",
         datefmt="%d-%b-%y %H:%M:%S",
     )
     c_handler.setFormatter(c_format)
