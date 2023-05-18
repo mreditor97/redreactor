@@ -23,7 +23,7 @@ jobs:
         github.event_name == 'workflow_run'
         && github.event.workflow_run.conclusion == 'success'
       )
-    name: ℹ️ Gather add-on information
+    name: ℹ️ Gather information
     runs-on: ubuntu-latest
     outputs:
       environment: ${{ steps.release.outputs.environment}}
