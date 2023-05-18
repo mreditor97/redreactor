@@ -3,10 +3,11 @@ import json
 import logging
 from typing import Any
 
-from components.mqtt import MQTT
-from configuration import DynamicConfiguration
-from helpers.repeater import RepeatTimer
 from paho.mqtt.client import Client
+
+from redreactor.components.mqtt import MQTT
+from redreactor.configuration import DynamicConfiguration
+from redreactor.helpers.repeater import RepeatTimer
 
 from .binary_sensor import BinarySensor
 from .button import Button

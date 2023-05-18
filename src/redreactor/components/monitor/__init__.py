@@ -6,18 +6,19 @@ import subprocess
 import sys
 from typing import Any
 
-from components.mqtt import MQTT
-from configuration import DynamicConfiguration
-from const import (
+from ina219 import INA219, DeviceRangeError
+from paho.mqtt.client import Client
+
+from redreactor.components.mqtt import MQTT
+from redreactor.configuration import DynamicConfiguration
+from redreactor.const import (
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MINIMUM,
     DEFAULT_BATTERY_WARNING_THRESHOLD,
     DEFAULT_REPORT_INTERVAL,
 )
-from helpers.emitter import EventEmitter
-from helpers.repeater import RepeatTimer
-from ina219 import INA219, DeviceRangeError
-from paho.mqtt.client import Client
+from redreactor.helpers.emitter import EventEmitter
+from redreactor.helpers.repeater import RepeatTimer
 
 from .data import MonitorData
 

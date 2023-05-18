@@ -10,11 +10,12 @@ import time
 from datetime import datetime
 from typing import Any, Literal
 
-from components.monitor import Monitor
-from components.mqtt import MQTT, MQTTMessage
-from configuration import DynamicConfiguration
-from helpers.emitter import EventEmitter
-from paho.mqtt.client import Client
+from paho.mqtt.client import Client, MQTTMessage
+
+from redreactor.components.monitor import Monitor
+from redreactor.components.mqtt import MQTT
+from redreactor.configuration import DynamicConfiguration
+from redreactor.helpers.emitter import EventEmitter
 
 
 class Commander:

@@ -1,1 +1,1 @@
-"""Event's module."""
+"""Helper's module."""
