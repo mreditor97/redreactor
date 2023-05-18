@@ -71,6 +71,12 @@ class Monitor:
 
         self.logger.info("Initiating battery monitor")
 
+        # Configure the report timer, gets started on MQTT connect
+        self.report_timer = RepeatTimer(
+            self.data.report_interval,
+            self._update,
+        )
+
         # Update Dynamic Configuration values to there latest values
         self._update_dynamic_configuration()
 
@@ -98,12 +104,6 @@ class Monitor:
             ina=ina,
         )
         self.monitor_timer.start()
-
-        # Configure the report timer, gets started on MQTT connect
-        self.report_timer = RepeatTimer(
-            self.data.report_interval,
-            self._update,
-        )
 
     def _monitor(self, ina: INA219) -> None:  # noqa: PLR0912
         """Monitor INA Thread Loop.
