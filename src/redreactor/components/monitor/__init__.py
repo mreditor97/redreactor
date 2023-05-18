@@ -256,10 +256,10 @@ class Monitor:
                         4,
                     ),
                     f"{self._static_configuration['fields']['battery_level']['name']}": self.data.battery_level,  # noqa: E501
-                    f"{self._static_configuration['fields']['external_power']['name']}": 
-                        self._static_configuration["fields"]["external_power"].get("payload_on", "ON")
+                    f"{self._static_configuration['fields']['external_power']['name']}":
+                        self._static_configuration["fields"]["external_power"].get("payload_on", "ON") # noqa: E501
                         if self.data.external_power else
-                            self._static_configuration["fields"]["external_power"].get("payload_off", "OFF"),
+                            self._static_configuration["fields"]["external_power"].get("payload_off", "OFF"), # noqa: E501
                     f"{self._static_configuration['fields']['cpu_temperature']['name']}": self.data.cpu_temperature,  # noqa: E501
                     f"{self._static_configuration['fields']['cpu_stat']['name']}": self.data.cpu_stat,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_warning_threshold']['name']}": self.data.battery_warning_threshold,  # noqa: E501
