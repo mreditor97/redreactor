@@ -124,4 +124,5 @@ repos:
         name: 🎗  Check YAML files with yamllint
         language: system
         types: [yaml]
+        exclude: ^.venv$
         entry: poetry run yamllint
