@@ -95,13 +95,13 @@ repos:
         entry: poetry run mypy
         require_serial: true
       - id: no-commit-to-branch
-        name: 🛑 Don't commit to main branch
+        name: 🛑 Don't commit to master branch
         language: system
         entry: poetry run no-commit-to-branch
         pass_filenames: false
         always_run: true
         args:
-          - --branch=main
+          - --branch=master
       - id: poetry
         name: 📜 Check pyproject with Poetry
         language: system
