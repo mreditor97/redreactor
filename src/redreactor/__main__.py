@@ -79,13 +79,13 @@ def main() -> None:
 
     # Update logging levels, limited to listed set
     logging_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-    if configuration.static["logging"]["console"] in logging_levels:
+    if str(configuration.static["logging"]["console"]).upper() in logging_levels:
         c_handler.setLevel(configuration.static["logging"]["console"])
         logger.info(
             "Console log level set to %s",
             configuration.static["logging"]["console"],
         )
-    if configuration.static["logging"]["file"] in logging_levels:
+    if str(configuration.static["logging"]["file"]).upper() in logging_levels:
         f_handler.setLevel(configuration.static["logging"]["file"])
         logger.info(
             "File log level set to %s",
