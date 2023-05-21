@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "redreactor"
 version = "0.0.0"
-description = "A Red Reactor Battery Monitor with MQTT and Home Assistant support"
+description = "Red Reactor Battery Monitoring service with MQTT, and Home Assistant support"
 repository = "https://github.com/mreditor97/redreactor"
 authors = ["MrEditor97"]
 license = "MIT"
