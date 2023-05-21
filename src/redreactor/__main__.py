@@ -2,13 +2,13 @@
 
 import argparse
 import logging
+from importlib.metadata import version
 
 from redreactor.components.commander import Commander
 from redreactor.components.homeassistant import Homeassistant
 from redreactor.components.monitor import Monitor
 from redreactor.components.mqtt import MQTT
 from redreactor.configuration import LinkedConfiguration
-from redreactor.const import __version__
 
 
 def get_arguments() -> argparse.Namespace:
@@ -68,8 +68,8 @@ def main() -> None:
     logger.addHandler(c_handler)
     logger.addHandler(f_handler)
 
-    logger.info("########################################")
-    logger.info("#### Red Reactor MQTT Client (%s) ####", __version__)
+    logger.info("#########################################")
+    logger.info("#### Red Reactor MQTT Client (%s) ####", version("redreactor"))
     logger.info("# With MQTT, and Home Assistant Support #")
     logger.info("Loading in static configuration file: %s", args.configuration_file)
     logger.info("Loading in dynamic configuration file: %s", args.database_file)
@@ -79,13 +79,13 @@ def main() -> None:
 
     # Update logging levels, limited to listed set
     logging_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-    if configuration.static["logging"]["console"] in logging_levels:
+    if str(configuration.static["logging"]["console"]).upper() in logging_levels:
         c_handler.setLevel(configuration.static["logging"]["console"])
         logger.info(
             "Console log level set to %s",
             configuration.static["logging"]["console"],
         )
-    if configuration.static["logging"]["file"] in logging_levels:
+    if str(configuration.static["logging"]["file"]).upper() in logging_levels:
         f_handler.setLevel(configuration.static["logging"]["file"])
         logger.info(
             "File log level set to %s",
