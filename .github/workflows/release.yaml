@@ -19,7 +19,7 @@ jobs:
   information:
     if: |
       github.event_name == 'release'
-      || (
+      ||  (
         github.event_name == 'workflow_run'
         && github.event.workflow_run.conclusion == 'success'
       )
@@ -52,7 +52,8 @@ jobs:
 
   release:
     name: 👷 Build & Release
-    needs: information
+    needs:
+      - information
     runs-on: ubuntu-latest
     steps:
       - name: ⤵️ Check out code from GitHub
@@ -73,9 +74,17 @@ jobs:
         run: poetry install --no-interaction
       - name: 🏗 Set package version
         run: |
-          version="${{ github.event.release.tag_name }}"
+          version="${{ needs.information.outputs.version }}"
           version="${version,,}"
           version="${version#v}"
           poetry version --no-interaction "${version}"
       - name: 🏗 Build package
         run: poetry build --no-interaction
+      - name: 🚀 Publish to PyPi
+        if: |
+          github.event_name == 'release'
+        env:
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          poetry config pypi-token.pypi "${PYPI_TOKEN}"
+          poetry publish --no-interaction
