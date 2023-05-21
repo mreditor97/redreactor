@@ -6,7 +6,7 @@
   "scripts": {
     "prettier": "prettier --write **/*.{json,js,md,yml,yaml} *.{json,js,md,yml,yaml}"
   },
-  "author": "MrEditor97 <info@mreditor97.co.uk>",
+  "author": "MrEditor97 <dev@mreditor97.co.uk>",
   "license": "MIT",
   "devDependencies": {
     "prettier": "2.8.8"
