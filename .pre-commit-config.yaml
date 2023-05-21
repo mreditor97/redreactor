@@ -78,7 +78,7 @@ repos:
         exclude: ^poetry\.lock$
         entry: poetry run codespell
       - id: detect-private-key
-        name: 🕵️  Detect Private Keys
+        name: 🕵️ Detect Private Keys
         language: system
         types: [text]
         entry: poetry run detect-private-key
@@ -121,8 +121,18 @@ repos:
         entry: poetry run trailing-whitespace-fixer
         stages: [commit, push, manual]
       - id: yamllint
-        name: 🎗  Check YAML files with yamllint
+        name: 🎗 Check YAML files with yamllint
         language: system
         types: [yaml]
         exclude: ^.venv$
         entry: poetry run yamllint
+  - repo: https://github.com/python-poetry/poetry
+    rev: 1.5.0
+    hooks:
+      - id: poetry-check
+        name: 🎫 Poetry Check
+      - id: poetry-lock
+        name: 🔐 Poetry Lock
+      - id: poetry-export
+        name: 📘 Poetry Export
+        args: ["-o", "extras/requirements.txt"]
