@@ -68,7 +68,7 @@ def main() -> None:
     logger.addHandler(c_handler)
     logger.addHandler(f_handler)
 
-    logger.info("########################################")
+    logger.info("#########################################")
     logger.info("#### Red Reactor MQTT Client (%s) ####", version("redreactor"))
     logger.info("# With MQTT, and Home Assistant Support #")
     logger.info("Loading in static configuration file: %s", args.configuration_file)
