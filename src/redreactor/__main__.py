@@ -2,13 +2,13 @@
 
 import argparse
 import logging
+from importlib.metadata import version
 
 from redreactor.components.commander import Commander
 from redreactor.components.homeassistant import Homeassistant
 from redreactor.components.monitor import Monitor
 from redreactor.components.mqtt import MQTT
 from redreactor.configuration import LinkedConfiguration
-from redreactor.const import __version__
 
 
 def get_arguments() -> argparse.Namespace:
@@ -69,7 +69,7 @@ def main() -> None:
     logger.addHandler(f_handler)
 
     logger.info("########################################")
-    logger.info("#### Red Reactor MQTT Client (%s) ####", __version__)
+    logger.info("#### Red Reactor MQTT Client (%s) ####", version("redreactor"))
     logger.info("# With MQTT, and Home Assistant Support #")
     logger.info("Loading in static configuration file: %s", args.configuration_file)
     logger.info("Loading in dynamic configuration file: %s", args.database_file)
