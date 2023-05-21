@@ -129,11 +129,11 @@ jobs:
       - name: 🚀 Trim Trailing Whitespace
         run: poetry run pre-commit run trailing-whitespace --all-files
       - name: 🚀 Check Poetry configuration
-        run: poetry run pre-commit run poetry-check
+        run: poetry run pre-commit run poetry-check --all-files
       - name: 🚀 Check Poetry lock file
-        run: poetry run pre-commit run poetry-lock
+        run: poetry run pre-commit run poetry-lock --all-files
       - name: 🚀 Check Poetry requirements
-        run: poetry run pre-commit run poetry-export
+        run: poetry run pre-commit run poetry-export --all-files
 
   mypy:
     name: MyPy
