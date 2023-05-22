@@ -2,7 +2,9 @@
 name = "redreactor"
 version = "0.0.0"
 description = "Red Reactor Battery Monitoring service with MQTT, and Home Assistant support"
+documentation = "https://github.com/mreditor97/redreactor"
 repository = "https://github.com/mreditor97/redreactor"
+homepage = "https://github.com/mreditor97/redreactor"
 authors = ["MrEditor97 <dev@mreditor97.co.uk>"]
 license = "MIT"
 readme = "README.md"
@@ -38,6 +40,7 @@ ruff = "0.0.269"
 safety = "2.4.0b1"
 types-cachetools = "^5.3.0"
 yamllint = "1.31.0"
+types-pyyaml = "^6.0.12.10"
 
 [tool.coverage.run]
 plugins = ["covdefaults"]

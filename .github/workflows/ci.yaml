@@ -134,6 +134,8 @@ jobs:
         run: poetry run pre-commit run poetry-lock --all-files
       - name: 🚀 Check Poetry requirements
         run: poetry run pre-commit run poetry-export --all-files
+      - name: 🚀 Check Renovate configuration
+        run: poetry run pre-commit run renovate-config-validator --all-files
 
   mypy:
     name: MyPy
