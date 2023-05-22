@@ -21,7 +21,7 @@ from redreactor.helpers.emitter import EventEmitter
 class Commander:
     """Commander for processing received MQTT commands."""
 
-    logger = logging.getLogger(__name__)
+    logger = logging.getLogger("Red Reactor")
 
     event: EventEmitter = EventEmitter()
 
