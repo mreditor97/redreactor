@@ -74,7 +74,7 @@ jobs:
         run: poetry install --no-interaction
       - name: 🏗 Set package version
         run: |
-          version="${{ needs.information.outputs.version }}"
+          version="${{ github.event.release.tag_name }}"
           version="${version,,}"
           version="${version#v}"
           poetry version --no-interaction "${version}"
@@ -82,7 +82,7 @@ jobs:
         run: poetry build --no-interaction
       - name: 🚀 Publish to PyPi
         if: |
-          github.event_name == 'release'
+          needs.information.outputs.environment == 'stable'
         env:
           PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
         run: |

@@ -1,1 +1,1 @@
-"""Helper's module."""
+"""Init file for Helper's module."""

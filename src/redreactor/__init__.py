@@ -1,1 +1,1 @@
-"""Init file for Red Reactor Battery Monitor."""
+"""Init file for Red Reactor Battery Monitoring service."""
