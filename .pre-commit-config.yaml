@@ -136,3 +136,8 @@ repos:
       - id: poetry-export
         name: 📘 Poetry Export
         args: ["-o", "extras/requirements.txt"]
+  - repo: https://github.com/renovatebot/pre-commit-hooks
+    rev: 35.98.0
+    hooks:
+      - id: renovate-config-validator
+        name: 🎫 Validate Renovate Config
