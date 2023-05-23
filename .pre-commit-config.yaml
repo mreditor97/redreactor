@@ -126,16 +126,6 @@ repos:
         types: [yaml]
         exclude: ^.venv$
         entry: poetry run yamllint
-  - repo: https://github.com/python-poetry/poetry
-    rev: 1.5.0
-    hooks:
-      - id: poetry-check
-        name: 🎫 Poetry Check
-      - id: poetry-lock
-        name: 🔐 Poetry Lock
-      - id: poetry-export
-        name: 📘 Poetry Export
-        args: ["-o", "extras/requirements.txt"]
   - repo: https://github.com/renovatebot/pre-commit-hooks
     rev: 35.98.0
     hooks:

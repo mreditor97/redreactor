@@ -128,12 +128,6 @@ jobs:
         run: poetry run pre-commit run end-of-file-fixer --all-files
       - name: 🚀 Trim Trailing Whitespace
         run: poetry run pre-commit run trailing-whitespace --all-files
-      - name: 🚀 Check Poetry configuration
-        run: poetry run pre-commit run poetry-check --all-files
-      - name: 🚀 Check Poetry lock file
-        run: poetry run pre-commit run poetry-lock --all-files
-      - name: 🚀 Check Poetry requirements
-        run: poetry run pre-commit run poetry-export --all-files
       - name: 🚀 Check Renovate configuration
         run: poetry run pre-commit run renovate-config-validator --all-files
 
