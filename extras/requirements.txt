@@ -1,7 +1,8 @@
 adafruit-gpio==1.0.3 ; python_version >= "3.10" and python_version < "4.0" \
     --hash=sha256:d6465b92c866c51ca8f3bc1e8f2ec36f5ccdb46d0fd54101c1109756d4a2dcd0
-adafruit-pureio==1.1.10 ; python_version >= "3.10" and python_version < "4.0" \
-    --hash=sha256:1206883753c0966309e6d02da970676e9bc7b503bb4a26f736e01739f56a64b9
+Adafruit-PureIO==1.1.11; python_version >= "3.10" and python_version < "4.0" \
+    --hash=sha256:281ab2099372cc0decc26326918996cbf21b8eed694ec4764d51eefa029d324e \
+    --hash=sha256:c4cfbb365731942d1f1092a116f47dfdae0aef18c5b27f1072b5824ad5ea8c7c
 mock==5.0.2 ; python_version >= "3.10" and python_version < "4.0" \
     --hash=sha256:06f18d7d65b44428202b145a9a36e99c2ee00d1eb992df0caf881d4664377891 \
     --hash=sha256:0e0bc5ba78b8db3667ad636d964eb963dc97a59f04c6f6214c5f0e4a8f726c56
