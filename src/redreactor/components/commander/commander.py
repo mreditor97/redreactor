@@ -67,11 +67,11 @@ class Commander:
             }:
                 self.logger.info(
                     "Subscribing to the %s topic at: %s/%s/%s/%s",
-                    field,
+                    self._static_configuration["fields"][field]["pretty"],
                     self._static_configuration["mqtt"]["base_topic"],
                     self._static_configuration["hostname"]["name"],
                     self._static_configuration["mqtt"]["topic"]["set"],
-                    self._static_configuration["fields"][field]["pretty"],
+                    self._static_configuration["fields"][field]["name"],
                 )
 
                 # Subscribe to that specific topic
