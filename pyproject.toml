@@ -130,6 +130,7 @@ ignore = [
   "D213", # Conflicts with other rules
   "D417", # False positives in some occasions
   "PLR2004", # Just annoying, not really useful
+  "RUF012", # Disabled until it is Ruff finalises it
 ]
 select = ["ALL"]
 
