@@ -13,6 +13,7 @@ from redreactor.components.mqtt import MQTT
 from redreactor.configuration import DynamicConfiguration
 from redreactor.const import (
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
+    DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
     DEFAULT_BATTERY_VOLTAGE_MINIMUM,
     DEFAULT_BATTERY_WARNING_THRESHOLD,
     DEFAULT_REPORT_INTERVAL,
@@ -191,7 +192,7 @@ class Monitor:
                     (voltage - self.data.battery_voltage_minimum)
                     / (
                         self.data.battery_voltage_maximum
-                        - 0.05
+                        - DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP
                         - self.data.battery_voltage_minimum
                     )
                     * 100,
