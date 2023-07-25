@@ -15,7 +15,7 @@ def dict_merge(dct: Any, merge_dct: dict[str, Any]) -> None:
     :param merge_dct: dct merged into dct
     :return: None.
     """
-    for k, _v in merge_dct.items():
+    for k in merge_dct:
         if k in dct and isinstance(dct[k], dict) and isinstance(merge_dct[k], dict):
             dict_merge(dct[k], merge_dct[k])
         else:
