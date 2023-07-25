@@ -152,12 +152,10 @@ class Monitor:
                 elif self.data.current >= 0:
                     # Battery now Full
                     self.data.external_power = True
-                else:
-                    # Charging
-                    if not self.data.external_power:  # noqa: PLR5501
-                        # Power restored
-                        self.data.external_power = True
-                        self._update()
+                elif not self.data.external_power:
+                    # Power restored
+                    self.data.external_power = True
+                    self._update()
 
         if (
             self.data.battery_level <= float(self.data.battery_warning_threshold)
