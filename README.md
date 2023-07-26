@@ -25,7 +25,7 @@ Functionality includes:
   - Change the Report Interval
 - Provides `systemd` service example, so it can be started as a service on system boot
 
-If you haven't already got yourself a Red Reactor (An uninterruptable battery powered backup for your Raspberry Pi), one can be purchased from there [website](https://theredreactor.com).
+If you haven't already got yourself a Red Reactor (An uninterruptible battery powered backup for your Raspberry Pi), one can be purchased from there [website](https://theredreactor.com).
 
 ## Home Assistant
 
