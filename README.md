@@ -25,6 +25,8 @@ Functionality includes:
   - Change the Report Interval
 - Provides `systemd` service example, so it can be started as a service on system boot
 
+If you haven't already got yourself a Red Reactor (An uninterruptible battery powered backup for your Raspberry Pi), one can be purchased from there [website](https://theredreactor.com).
+
 ## Home Assistant
 
 Connecting your Home Assistant instance to the same MQTT Broker as your Red Reactor will allow your Red Reactor to be auto discovered by your Home Assistant instance. It will give you access to all the readings available from the Red Reactor sensors, and allows full configuration of the Red Reactor on the fly - it even adds the ability to reboot and shutdown your device at the push of a button.
