@@ -76,7 +76,7 @@ class Homeassistant:
             field = static_configuration["fields"][field]  # noqa: PLW2901
 
             configuring: Base = Base(
-                name=f"{configuration_defaults.name} {field.get('pretty')}",
+                name=f"{field.get('pretty')}",
                 device_class=field.get("device_class", None),
                 state_class="measurement",
                 expire_after=int(static_configuration["homeassistant"]["expire_after"]),
