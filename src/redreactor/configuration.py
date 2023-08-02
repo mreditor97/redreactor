@@ -136,21 +136,21 @@ class LinkedConfiguration:
                 },
                 "battery_level": {
                     "name": "battery_level",
-                    "pretty": "Battery Level",
+                    "pretty": "Battery level",
                     "type": "sensor",
                     "unit": "%",
                     "device_class": "battery",
                 },
                 "external_power": {
                     "name": "external_power",
-                    "pretty": "External Power",
+                    "pretty": "External power",
                     "type": "binary_sensor",
                     "device_class": "plug",
                     "entity_category": "diagnostic",
                 },
                 "cpu_temperature": {
                     "name": "cpu_temperature",
-                    "pretty": "CPU Temperature",
+                    "pretty": "CPU temperature",
                     "type": "sensor",
                     "unit": "°C",
                     "device_class": "temperature",
@@ -159,13 +159,13 @@ class LinkedConfiguration:
                 },
                 "cpu_stat": {
                     "name": "cpu_stat",
-                    "pretty": "CPU Stat",
+                    "pretty": "CPU stat",
                     "type": "sensor",
                     "entity_category": "diagnostic",
                 },
                 "battery_warning_threshold": {
                     "name": "battery_warning_threshold",
-                    "pretty": "Battery Warning",
+                    "pretty": "Battery warning",
                     "type": "number",
                     "unit": "%",
                     "device_class": "battery",
@@ -177,7 +177,7 @@ class LinkedConfiguration:
                 },
                 "battery_voltage_minimum": {
                     "name": "battery_voltage_minimum",
-                    "pretty": "Battery Voltage Minimum",
+                    "pretty": "Battery voltage minimum",
                     "type": "number",
                     "unit": "V",
                     "device_class": "voltage",
@@ -189,7 +189,7 @@ class LinkedConfiguration:
                 },
                 "battery_voltage_maximum": {
                     "name": "battery_voltage_maximum",
-                    "pretty": "Battery Voltage Maximum",
+                    "pretty": "Battery voltage maximum",
                     "type": "number",
                     "unit": "V",
                     "device_class": "voltage",
@@ -201,7 +201,7 @@ class LinkedConfiguration:
                 },
                 "report_interval": {
                     "name": "report_interval",
-                    "pretty": "Report Interval",
+                    "pretty": "Report interval",
                     "type": "number",
                     "unit": "s",
                     "entity_category": "diagnostic",
