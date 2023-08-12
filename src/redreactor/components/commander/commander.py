@@ -2,20 +2,24 @@
 
 Adds support for receiving and processing MQTT commands.
 """
+from __future__ import annotations
+
 import json
 import logging
 import os
 import sys
 import time
 from datetime import datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from paho.mqtt.client import Client, MQTTMessage
-
-from redreactor.components.monitor import Monitor
 from redreactor.components.mqtt import MQTT
-from redreactor.configuration import DynamicConfiguration
 from redreactor.helpers.emitter import EventEmitter
+
+if TYPE_CHECKING:
+    from paho.mqtt.client import Client, MQTTMessage
+
+    from redreactor.components.monitor import Monitor
+    from redreactor.configuration import DynamicConfiguration
 
 
 class Commander:

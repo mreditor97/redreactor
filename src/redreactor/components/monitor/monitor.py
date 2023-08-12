@@ -1,16 +1,16 @@
 """Monitor module."""
 
+from __future__ import annotations
+
 import json
 import logging
 import subprocess
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ina219 import INA219, DeviceRangeError
-from paho.mqtt.client import Client
 
 from redreactor.components.mqtt import MQTT
-from redreactor.configuration import DynamicConfiguration
 from redreactor.const import (
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
@@ -22,6 +22,11 @@ from redreactor.helpers.emitter import EventEmitter
 from redreactor.helpers.repeater import RepeatTimer
 
 from .data import MonitorData
+
+if TYPE_CHECKING:
+    from paho.mqtt.client import Client
+
+    from redreactor.configuration import DynamicConfiguration
 
 
 class Monitor:

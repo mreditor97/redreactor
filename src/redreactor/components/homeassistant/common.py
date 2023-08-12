@@ -1,5 +1,7 @@
 """Home Assistant Common."""
 
+from __future__ import annotations
+
 from json import JSONEncoder
 from typing import Any
 
