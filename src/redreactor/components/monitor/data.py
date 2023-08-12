@@ -1,6 +1,8 @@
 """Monitor Data file."""
 
 
+from __future__ import annotations
+
 from redreactor.const import (
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MINIMUM,

@@ -1,12 +1,11 @@
 """Home Assistant module."""
+from __future__ import annotations
+
 import json
 import logging
-from typing import Any
-
-from paho.mqtt.client import Client
+from typing import TYPE_CHECKING, Any
 
 from redreactor.components.mqtt import MQTT
-from redreactor.configuration import DynamicConfiguration
 from redreactor.helpers.repeater import RepeatTimer
 
 from .binary_sensor import BinarySensor
@@ -14,6 +13,11 @@ from .button import Button
 from .common import Availability, Base, Device, Encoder
 from .number import Number
 from .sensor import Sensor
+
+if TYPE_CHECKING:
+    from paho.mqtt.client import Client
+
+    from redreactor.configuration import DynamicConfiguration
 
 
 class Homeassistant:
