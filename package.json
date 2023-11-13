@@ -9,6 +9,6 @@
   "author": "MrEditor97 <dev@mreditor97.co.uk>",
   "license": "MIT",
   "devDependencies": {
-    "prettier": "3.0.3"
+    "prettier": "3.1.0"
   }
 }
