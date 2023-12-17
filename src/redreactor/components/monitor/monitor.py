@@ -138,7 +138,7 @@ class Monitor:
 
                 MQTT.event.emit(
                     event_name="publish",
-                    topic=f"{self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['status']}",  # noqa: E501
+                    topic=f"{self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['status']}",
                     payload=f"{self._static_configuration['status']['offline']}",
                 )
             except ZeroDivisionError:
