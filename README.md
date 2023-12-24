@@ -2,6 +2,8 @@
 
 This is a Red Reactor MQTT Client service that is designed to run as a background application to monitor battery status, and to publish that data to a MQTT broker.
 
+**Installation instructions can be found [here](https://github.com/mreditor97/redreactor/wiki).**
+
 Functionality includes:
 
 - Background application that continuously monitors the battery status, and will safely shutdown if required
@@ -31,7 +33,7 @@ If you haven't already got yourself a Red Reactor (An uninterruptible battery po
 
 Connecting your Home Assistant instance to the same MQTT Broker as your Red Reactor will allow your Red Reactor to be auto discovered by your Home Assistant instance. It will give you access to all the readings available from the Red Reactor sensors, and allows full configuration of the Red Reactor on the fly - it even adds the ability to reboot and shutdown your device at the push of a button.
 
-There is also a [Home Assistant Add-on](https://github.com/mreditor97/homeassistant-addons) available for Supervisor users.
+There is also a [Home Assistant Add-on](https://github.com/mreditor97/homeassistant-addons) available for Supervisor users. Installation instructions can be found in the [wiki](https://github.com/mreditor97/redreactor/wiki).
 
 ## MQTT
 
