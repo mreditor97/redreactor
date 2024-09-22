@@ -9,7 +9,6 @@ import sys
 from typing import TYPE_CHECKING, Any
 
 from ina219 import INA219, DeviceRangeError
-
 from redreactor.components.mqtt import MQTT
 from redreactor.const import (
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
@@ -25,7 +24,6 @@ from .data import MonitorData
 
 if TYPE_CHECKING:
     from paho.mqtt.client import Client
-
     from redreactor.configuration import DynamicConfiguration
 
 
@@ -111,7 +109,7 @@ class Monitor:
         )
         self.monitor_timer.start()
 
-    def _monitor(self, ina: INA219) -> None:  # noqa: PLR0912
+    def _monitor(self, ina: INA219) -> None:  # noqa: PLR0912, C901
         """Monitor INA Thread Loop.
 
         Gets called every 'monitor_interval'.

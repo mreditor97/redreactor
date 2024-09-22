@@ -17,7 +17,6 @@ from redreactor.helpers.emitter import EventEmitter
 
 if TYPE_CHECKING:
     from paho.mqtt.client import Client, MQTTMessage
-
     from redreactor.components.monitor import Monitor
     from redreactor.configuration import DynamicConfiguration
 

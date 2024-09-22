@@ -16,7 +16,6 @@ from .sensor import Sensor
 
 if TYPE_CHECKING:
     from paho.mqtt.client import Client
-
     from redreactor.configuration import DynamicConfiguration
 
 

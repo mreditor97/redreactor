@@ -10,7 +10,6 @@ import sys
 from typing import Any
 
 from paho.mqtt.client import Client, MQTTMessage, MQTTv5, MQTTv311
-
 from redreactor.helpers.emitter import EventEmitter
 
 
