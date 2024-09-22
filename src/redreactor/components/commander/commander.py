@@ -53,7 +53,7 @@ class Commander:
         MQTT.event.on(event_name="on_connect", function=self._on_connect)
         MQTT.event.on(event_name="on_message", function=self._on_message)
 
-    def _on_connect(  # noqa: PLR0913
+    def _on_connect(
         self,
         client: Client,
         userdata: Any,  # noqa: ARG002
