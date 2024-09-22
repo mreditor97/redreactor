@@ -262,9 +262,7 @@ class Monitor:
                     f"{self._static_configuration['fields']['battery_level']['name']}": self.data.battery_level,  # noqa: E501
                     f"{self._static_configuration['fields']['external_power']['name']}": self._static_configuration[  # noqa: E501
                         "fields"
-                    ][
-                        "external_power"
-                    ].get(
+                    ]["external_power"].get(
                         "payload_on",
                         "ON",
                     )
