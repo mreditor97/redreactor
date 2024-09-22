@@ -10,6 +10,7 @@ import sys
 from typing import Any
 
 from paho.mqtt.client import Client, MQTTMessage, MQTTv5, MQTTv311
+
 from redreactor.helpers.emitter import EventEmitter
 
 
@@ -114,7 +115,7 @@ class MQTT:
         # Run forever until battery shutdown or user exit
         self._client.loop_forever()
 
-    def _mqtt_on_connect(  # noqa: PLR0913
+    def _mqtt_on_connect(
         self,
         client: Client,
         userdata: Any,

@@ -9,6 +9,7 @@ import sys
 from typing import TYPE_CHECKING, Any
 
 from ina219 import INA219, DeviceRangeError
+
 from redreactor.components.mqtt import MQTT
 from redreactor.const import (
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
@@ -24,6 +25,7 @@ from .data import MonitorData
 
 if TYPE_CHECKING:
     from paho.mqtt.client import Client
+
     from redreactor.configuration import DynamicConfiguration
 
 
@@ -109,7 +111,7 @@ class Monitor:
         )
         self.monitor_timer.start()
 
-    def _monitor(self, ina: INA219) -> None:  # noqa: PLR0912, C901
+    def _monitor(self, ina: INA219) -> None:  # noqa: C901
         """Monitor INA Thread Loop.
 
         Gets called every 'monitor_interval'.
@@ -211,8 +213,8 @@ class Monitor:
 
         # Read data from Kernel endpoints
         try:
-            cpu_temperature = subprocess.Popen(
-                ["cat", "/sys/class/thermal/thermal_zone0/temp"],  # noqa: S603, S607
+            cpu_temperature = subprocess.Popen(  # noqa: S603
+                ["cat", "/sys/class/thermal/thermal_zone0/temp"],  # noqa: S607
                 stdout=subprocess.PIPE,
             )
             result_cpu_temperature = cpu_temperature.communicate()
@@ -221,11 +223,8 @@ class Monitor:
                 2,
             )
 
-            cpu_stat = subprocess.Popen(
-                [  # noqa: S603, S607
-                    "cat",
-                    "/sys/devices/platform/soc/soc:firmware/get_throttled",
-                ],
+            cpu_stat = subprocess.Popen(  # noqa: S603
+                ["cat","/sys/devices/platform/soc/soc:firmware/get_throttled"],  # noqa: S607
                 stdout=subprocess.PIPE,
             )
             result_cpu_stat = cpu_stat.communicate()
@@ -318,7 +317,7 @@ class Monitor:
             # Update Monitor timer interval
             self.report_timer.interval = self.data.report_interval
 
-    def _mqtt_on_connect(  # noqa: PLR0913
+    def _mqtt_on_connect(
         self,
         client: Client,  # noqa: ARG002
         userdata: Any,  # noqa: ARG002

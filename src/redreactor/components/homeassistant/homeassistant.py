@@ -16,6 +16,7 @@ from .sensor import Sensor
 
 if TYPE_CHECKING:
     from paho.mqtt.client import Client
+
     from redreactor.configuration import DynamicConfiguration
 
 
@@ -173,7 +174,7 @@ class Homeassistant:
             self._static_configuration["homeassistant"]["discovery_interval"],
         )
 
-    def _mqtt_on_connect(  # noqa: PLR0913
+    def _mqtt_on_connect(
         self,
         client: Client,  # noqa: ARG002
         userdata: Any,  # noqa: ARG002

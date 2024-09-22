@@ -12,8 +12,8 @@ class Number(Base):
 
     command_topic: str | None
     command_template: str | None
-    min: float | None  # noqa: A003
-    max: float | None  # noqa: A003
+    min: float | None
+    max: float | None
     mode: str | None
     optimistic: bool | None
     unit_of_measurement: str | None
