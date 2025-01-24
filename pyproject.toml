@@ -26,7 +26,7 @@ Changelog = "https://github.com/mreditor97/redreactor/releases"
 aresponses = "3.0.0"
 black = "24.10.0"
 blacken-docs = "1.19.1"
-codespell = "2.3.0"
+codespell = "2.4.0"
 covdefaults = "2.3.0"
 coverage = {version = "7.6.10", extras = ["toml"]}
 mypy = "1.14.1"
