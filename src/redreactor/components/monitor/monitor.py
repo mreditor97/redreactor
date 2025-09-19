@@ -213,7 +213,7 @@ class Monitor:
 
         # Read data from Kernel endpoints
         try:
-            cpu_temperature = subprocess.Popen(  # noqa: S603
+            cpu_temperature = subprocess.Popen(
                 ["cat", "/sys/class/thermal/thermal_zone0/temp"],  # noqa: S607
                 stdout=subprocess.PIPE,
             )
@@ -223,7 +223,7 @@ class Monitor:
                 2,
             )
 
-            cpu_stat = subprocess.Popen(  # noqa: S603
+            cpu_stat = subprocess.Popen(
                 ["cat","/sys/devices/platform/soc/soc:firmware/get_throttled"],  # noqa: S607
                 stdout=subprocess.PIPE,
             )
