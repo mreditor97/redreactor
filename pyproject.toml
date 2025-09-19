@@ -133,6 +133,7 @@ lint.ignore = [
   "RUF012", # Disabled until it is Ruff finalises it
   "FBT001", # Disabled for now
   "PLC0206", # Disabled for now
+  "RUF100", # Disabled for now
 ]
 lint.select = ["ALL"]
 
