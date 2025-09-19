@@ -169,7 +169,7 @@ class MQTT:
 
     def _mqtt_on_message(
         self,
-        client_id: str,
+        client: Client,
         userdata: Any,
         message: MQTTMessage,
     ) -> None:
@@ -182,7 +182,7 @@ class MQTT:
 
         self.event.emit(
             event_name="on_message",
-            client_id=client_id,
+            client=client,
             userdata=userdata,
             message=message,
         )
