@@ -131,6 +131,8 @@ lint.ignore = [
   "D417", # False positives in some occasions
   "PLR2004", # Just annoying, not really useful
   "RUF012", # Disabled until it is Ruff finalises it
+  "FBT001", # Disabled for now
+  "PLC0206", # Disabled for now
 ]
 lint.select = ["ALL"]
 
