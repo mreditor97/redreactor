@@ -2,6 +2,7 @@
 
 Custom event emitter.
 """
+
 from typing import Any
 
 

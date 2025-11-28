@@ -2,6 +2,7 @@
 
 Adds support for receiving and processing MQTT commands.
 """
+
 from __future__ import annotations
 
 import json

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
-import subprocess
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ina219 import INA219, DeviceRangeError
@@ -50,6 +50,7 @@ class Monitor:
         external_power=True,
         cpu_temperature=0.0,
         cpu_stat=0,
+        cpu_stat_text="OK",
         battery_warning_threshold=DEFAULT_BATTERY_WARNING_THRESHOLD,
         battery_voltage_minimum=DEFAULT_BATTERY_VOLTAGE_MINIMUM,
         battery_voltage_maximum=DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
@@ -206,6 +207,30 @@ class Monitor:
             ),
         )
 
+    def _decode_cpu_stat_text(self, value: int) -> str:
+        """Decode CPU Stat information into readable text."""
+        messages = []
+
+        if value & (1 << 0):
+            messages.append("Under-voltage NOW")
+        if value & (1 << 1):
+            messages.append("Frequency Capped NOW")
+        if value & (1 << 2):
+            messages.append("Currently Throttled")
+        if value & (1 << 3):
+            messages.append("Soft Temp Limit NOW")
+
+        if value & (1 << 16):
+            messages.append("Under-voltage OCCURRED")
+        if value & (1 << 17):
+            messages.append("Frequency Capped OCCURRED")
+        if value & (1 << 18):
+            messages.append("Throttling OCCURRED")
+        if value & (1 << 19):
+            messages.append("Soft Temp Limit OCCURRED")
+
+        return ", ".join(messages) if messages else "OK"
+
     def _update(self) -> None:
         """Pushes the latest data to Monitor endpoint."""
         # Force a update of the dynamic configuration values
@@ -213,26 +238,20 @@ class Monitor:
 
         # Read data from Kernel endpoints
         try:
-            cpu_temperature = subprocess.Popen(
-                ["cat", "/sys/class/thermal/thermal_zone0/temp"],  # noqa: S607
-                stdout=subprocess.PIPE,
-            )
-            result_cpu_temperature = cpu_temperature.communicate()
-            self.data.cpu_temperature = round(
-                float((result_cpu_temperature[0]).decode()) * 0.001,
-                2,
-            )
+            cpu_temperature_path = "/sys/class/thermal/thermal_zone0/temp"
+            with Path(cpu_temperature_path).open("r") as f:
+                cpu_temperature_milli = int(f.read().strip())
+                self.data.cpu_temperature = round(cpu_temperature_milli / 1000.0, 2)
 
-            cpu_stat = subprocess.Popen(
-                ["cat","/sys/devices/platform/soc/soc:firmware/get_throttled"],  # noqa: S607
-                stdout=subprocess.PIPE,
-            )
-            result_cpu_stat = cpu_stat.communicate()
-            self.data.cpu_stat = int(result_cpu_stat[0].decode())
-        except (OSError, IndexError, ValueError):
+            cpu_stat_path = "/sys/devices/platform/soc/soc:firmware/get_throttled"
+            with Path(cpu_stat_path).open("r") as f:
+                self.data.cpu_stat = int(f.read().strip(), 16)
+                self.data.cpu_stat_text = self._decode_cpu_stat_text(self.data.cpu_stat)
+        except (OSError, ValueError):
             # Failed to extract info
             self.logger.exception("Failed to read CPU Information")
             self.data.cpu_stat = None
+            self.data.cpu_stat_text = "Error"
             self.data.cpu_temperature = None
 
         # Publish heartbeat to status endpoint
@@ -257,19 +276,22 @@ class Monitor:
                         4,
                     ),
                     f"{self._static_configuration['fields']['battery_level']['name']}": self.data.battery_level,  # noqa: E501
-                    f"{self._static_configuration['fields']['external_power']['name']}": self._static_configuration[  # noqa: E501
-                        "fields"
-                    ]["external_power"].get(
-                        "payload_on",
-                        "ON",
-                    )
-                    if self.data.external_power
-                    else self._static_configuration["fields"]["external_power"].get(
-                        "payload_off",
-                        "OFF",
+                    f"{self._static_configuration['fields']['external_power']['name']}": (  # noqa: E501
+                        self._static_configuration["fields"][  # noqa: E501
+                            "external_power"
+                        ].get(
+                            "payload_on",
+                            "ON",
+                        )
+                        if self.data.external_power
+                        else self._static_configuration["fields"]["external_power"].get(
+                            "payload_off",
+                            "OFF",
+                        )
                     ),
                     f"{self._static_configuration['fields']['cpu_temperature']['name']}": self.data.cpu_temperature,  # noqa: E501
                     f"{self._static_configuration['fields']['cpu_stat']['name']}": self.data.cpu_stat,  # noqa: E501
+                    f"{self._static_configuration['fields']['cpu_stat_text']['name']}": self.data.cpu_stat_text,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_warning_threshold']['name']}": self.data.battery_warning_threshold,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_voltage_minimum']['name']}": self.data.battery_voltage_minimum,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_voltage_maximum']['name']}": self.data.battery_voltage_maximum,  # noqa: E501

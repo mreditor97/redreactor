@@ -2,10 +2,10 @@
 
 Provides the connection and events around MQTT.
 """
+
 from __future__ import annotations
 
 import logging
-import socket
 import sys
 from typing import Any
 
@@ -106,7 +106,7 @@ class MQTT:
 
         try:
             self._client.connect(host=broker, port=port, keepalive=timeout)
-        except (ConnectionRefusedError, socket.timeout):
+        except (ConnectionRefusedError, TimeoutError):
             self.logger.exception("Unable to connect to the MQTT Broker")
 
             if self._exit_on_fail:

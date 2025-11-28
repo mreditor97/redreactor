@@ -1,4 +1,5 @@
 """Home Assistant module."""
+
 from __future__ import annotations
 
 import json
@@ -13,6 +14,7 @@ from .button import Button
 from .common import Availability, Base, Device, Encoder
 from .number import Number
 from .sensor import Sensor
+from .text import Text
 
 if TYPE_CHECKING:
     from paho.mqtt.client import Client
@@ -25,7 +27,7 @@ class Homeassistant:
 
     logger = logging.getLogger("Red Reactor")
 
-    configuration: list[Sensor | Number | BinarySensor | Button] = []
+    configuration: list[Sensor | Number | BinarySensor | Button | Text] = []
 
     _static_configuration: dict[str, Any] = {}
     _dynamic_configuration: DynamicConfiguration
@@ -105,7 +107,7 @@ class Homeassistant:
                 device=configuration_defaults,
             )
 
-            configured: Sensor | BinarySensor | Number | Button = Sensor()
+            configured: Sensor | BinarySensor | Number | Button | Text = Sensor()
             if field["type"] == "sensor":
                 configured = Sensor(
                     unit_of_measurement=field.get("unit", None),
@@ -142,6 +144,13 @@ class Homeassistant:
                         "payload_press",
                         json.dumps(True),  # noqa: FBT003
                     ),
+                )
+
+            if field["text"] == "text":
+                configured = Text(
+                    min=field.get("min", 0),
+                    max=field.get("max", 255),
+                    mode=field.get("mode", "text"),
                 )
 
             # Merge the configurations

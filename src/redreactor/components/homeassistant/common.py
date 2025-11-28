@@ -126,7 +126,9 @@ class Base(Representer):
     availability_mode: str | None
     device: Device | None
 
-    configuration_topic: str | None  # Used for one time creation of the Home Assistant configuration topic # noqa: E501
+    configuration_topic: (
+        str | None
+    )  # Used for one time creation of the Home Assistant configuration topic # noqa: E501
 
     def __init__(  # noqa: PLR0913
         self,

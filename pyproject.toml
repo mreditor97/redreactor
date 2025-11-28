@@ -1,28 +1,30 @@
-[tool.poetry]
+[project]
 name = "redreactor"
 version = "0.0.0"
 description = "Red Reactor Battery Monitoring service with MQTT, and Home Assistant support"
 documentation = "https://github.com/mreditor97/redreactor"
 repository = "https://github.com/mreditor97/redreactor"
 homepage = "https://github.com/mreditor97/redreactor"
-authors = ["MrEditor97 <dev@mreditor97.co.uk>"]
+authors = [
+  { name = "MrEditor97", email = "dev@mreditor97.co.uk" },
+]
 license = "MIT"
-readme = "README.md"
+readme = { file = "README.md", content-type = "text/markdown" }
 packages = [
   { include = "redreactor", from = "src"},
 ]
+requires-python = ">=3.10"
+dependencies = [
+  "pi-ina219 >= 1.4.1",
+  "paho-mqtt >= 2.0.0",
+  "pyyaml >= 6.0",
+]
 
-[tool.poetry.dependencies]
-python = "^3.10"
-pi-ina219 = "^1.4.1"
-paho-mqtt = "^2.0.0"
-pyyaml = "^6.0"
-
-[tool.poetry.urls]
+[project.urls]
 "Bug Tracker" = "https://github.com/mreditor97/redreactor/issues"
 Changelog = "https://github.com/mreditor97/redreactor/releases"
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 aresponses = "3.0.0"
 black = "25.11.0"
 blacken-docs = "1.20.0"
@@ -133,6 +135,7 @@ lint.ignore = [
   "FBT001", # Disabled for now
   "PLC0206", # Disabled for now
   "RUF100", # Disabled for now
+  "EXE002", # Disabled for now
 ]
 lint.select = ["ALL"]
 

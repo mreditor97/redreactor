@@ -2,6 +2,7 @@
 
 Contains the ability to read the static and dynamic configuration files.
 """
+
 from __future__ import annotations
 
 import json
@@ -160,9 +161,16 @@ class LinkedConfiguration:
                     "suggested_display_precision": 2,
                 },
                 "cpu_stat": {
+                    "name": "cpu_stat_raw",
+                    "pretty": "CPU stat raw",
+                    "type": "sensor",
+                    "entity_category": "diagnostic",
+                    "enabled_by_default": False,
+                },
+                "cpu_stat_text": {
                     "name": "cpu_stat",
                     "pretty": "CPU stat",
-                    "type": "sensor",
+                    "type": "text",
                     "entity_category": "diagnostic",
                 },
                 "battery_warning_threshold": {

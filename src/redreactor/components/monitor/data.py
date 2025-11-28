@@ -1,6 +1,5 @@
 """Monitor Data file."""
 
-
 from __future__ import annotations
 
 from redreactor.const import (
@@ -20,6 +19,7 @@ class MonitorData:
     external_power: bool
     cpu_temperature: float | None
     cpu_stat: int | None
+    cpu_stat_text: str | None
     battery_warning_threshold: int
     battery_voltage_minimum: float
     battery_voltage_maximum: float
@@ -33,6 +33,7 @@ class MonitorData:
         external_power: bool = True,  # noqa: FBT001, FBT002
         cpu_temperature: float = 0.0,
         cpu_stat: int = 0,
+        cpu_stat_text: str = "OK",
         battery_warning_threshold: int = DEFAULT_BATTERY_WARNING_THRESHOLD,
         battery_voltage_minimum: float = DEFAULT_BATTERY_VOLTAGE_MINIMUM,
         battery_voltage_maximum: float = DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
@@ -45,6 +46,7 @@ class MonitorData:
         self.external_power = external_power
         self.cpu_temperature = cpu_temperature
         self.cpu_stat = cpu_stat
+        self.cpu_stat_text = cpu_stat_text
         self.battery_warning_threshold = battery_warning_threshold
         self.battery_voltage_minimum = battery_voltage_minimum
         self.battery_voltage_maximum = battery_voltage_maximum
