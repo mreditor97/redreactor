@@ -22,7 +22,7 @@ pyyaml = "^6.0"
 "Bug Tracker" = "https://github.com/mreditor97/redreactor/issues"
 Changelog = "https://github.com/mreditor97/redreactor/releases"
 
-[tool.poetry.dev-dependencies]
+[tool.poetry.group.dev.dependencies]
 aresponses = "3.0.0"
 black = "25.11.0"
 blacken-docs = "1.20.0"
@@ -133,6 +133,7 @@ lint.ignore = [
   "FBT001", # Disabled for now
   "PLC0206", # Disabled for now
   "RUF100", # Disabled for now
+  "EXE002", # Disabled for now
 ]
 lint.select = ["ALL"]
 

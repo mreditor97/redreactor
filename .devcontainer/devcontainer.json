@@ -44,7 +44,7 @@
     }
   },
   "features": {
-    "ghcr.io/devcontainers-contrib/features/poetry:2": {},
+    "ghcr.io/devcontainers-extra/features/poetry:2": {},
     "ghcr.io/devcontainers/features/github-cli:1": {},
     "ghcr.io/devcontainers/features/node:1": {},
     "ghcr.io/devcontainers/features/python:1": {
@@ -53,5 +53,7 @@
   },
   "image": "mcr.microsoft.com/devcontainers/base:ubuntu",
   "name": "Red Reactor Battery Monitor service",
-  "updateContentCommand": ". ${NVM_DIR}/nvm.sh && nvm install && nvm use && npm install && poetry install && poetry run pre-commit install"
+  "updateContentCommand": ". ${NVM_DIR}/nvm.sh && nvm install && nvm use && npm install && poetry install && poetry run pre-commit install",
+  "remoteUser": "vscode",
+  "containerUser": "vscode"
 }
