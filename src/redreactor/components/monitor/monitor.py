@@ -7,7 +7,6 @@ import logging
 import sys
 from typing import TYPE_CHECKING, Any
 
-from helpers import utils
 from ina219 import INA219, DeviceRangeError
 
 from redreactor.components.mqtt import MQTT
@@ -20,6 +19,13 @@ from redreactor.const import (
 )
 from redreactor.helpers.emitter import EventEmitter
 from redreactor.helpers.repeater import RepeatTimer
+from redreactor.helpers.utils import (
+    decode_cpu_stat_text,
+    read_cpu_stat_sysfs,
+    read_cpu_stat_vcgencmd,
+    read_cpu_temperature_sysfs,
+    read_cpu_temperature_vcgencmd,
+)
 
 from .data import MonitorData
 
@@ -211,19 +217,16 @@ class Monitor:
         """Update CPU information, including temperature and throttling."""
         try:
             # Temperature
-            temp = (
-                utils.read_cpu_temperature_sysfs()
-                or utils.read_cpu_temperature_vcgencmd()
-            )
+            temp = read_cpu_temperature_sysfs() or read_cpu_temperature_vcgencmd()
             self.data.cpu_temperature = temp
 
             # Throttled state
-            stat = utils.read_cpu_stat_sysfs() or utils.read_cpu_stat_vcgencmd()
+            stat = read_cpu_stat_sysfs() or read_cpu_stat_vcgencmd()
             self.data.cpu_stat = stat
 
             # Decode text
             self.data.cpu_stat_text = (
-                utils.decode_cpu_stat_text(stat) if stat is not None else None
+                decode_cpu_stat_text(stat) if stat is not None else None
             )
 
         except Exception:
