@@ -125,6 +125,7 @@ class Base(Representer):
     availability: list[Availability] | None
     availability_mode: str | None
     device: Device | None
+    enabled_by_default: bool | None
 
     configuration_topic: (
         str | None
@@ -145,6 +146,7 @@ class Base(Representer):
         availability: list[Availability] | None = None,
         availability_mode: str | None = None,
         device: Device | None = None,
+        enabled_by_default: bool | None = None,
         configuration_topic: str | None = None,
     ) -> None:
         """Initialise Home Assistant Base object."""
@@ -161,5 +163,6 @@ class Base(Representer):
         self.availability = availability
         self.availability_mode = availability_mode
         self.device = device
+        self.enabled_by_default = enabled_by_default
 
         self.configuration_topic = configuration_topic

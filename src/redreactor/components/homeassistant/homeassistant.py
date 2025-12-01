@@ -115,6 +115,7 @@ class Homeassistant:
                         None,
                     ),
                     state_class=field.get("state_class", None),
+                    native_value=field.get("native_value", None),
                 )
 
             if field["type"] == "binary_sensor":

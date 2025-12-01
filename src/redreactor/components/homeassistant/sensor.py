@@ -19,7 +19,7 @@ class Sensor(Base):
     state_class: str | None
     native_value: (
         str | int | float | datetime.date | datetime.datetime | decimal.Decimal | None
-    )  # noqa: E501
+    )
 
     def __init__(
         self,
@@ -28,7 +28,7 @@ class Sensor(Base):
         state_class: str | None = None,
         native_value: (
             str | float | datetime.date | datetime.datetime | decimal.Decimal | None
-        ) = None,  # noqa: E501
+        ) = None,
         **kwargs: Any,
     ) -> None:
         """Initialise Home Assistant sensor."""
