@@ -18,7 +18,7 @@ class MonitorData:
     battery_level: float
     external_power: bool
     cpu_temperature: float | None
-    cpu_stat: int | None
+    cpu_stat_raw: int | None
     cpu_stat_text: str | None
     battery_warning_threshold: int
     battery_voltage_minimum: float
@@ -32,7 +32,7 @@ class MonitorData:
         battery_level: float = 0.0,
         external_power: bool = True,  # noqa: FBT001, FBT002
         cpu_temperature: float = 0.0,
-        cpu_stat: int = 0,
+        cpu_stat_raw: int = 0,
         cpu_stat_text: str = "OK",
         battery_warning_threshold: int = DEFAULT_BATTERY_WARNING_THRESHOLD,
         battery_voltage_minimum: float = DEFAULT_BATTERY_VOLTAGE_MINIMUM,
@@ -45,7 +45,7 @@ class MonitorData:
         self.battery_level = battery_level
         self.external_power = external_power
         self.cpu_temperature = cpu_temperature
-        self.cpu_stat = cpu_stat
+        self.cpu_stat_raw = cpu_stat_raw
         self.cpu_stat_text = cpu_stat_text
         self.battery_warning_threshold = battery_warning_threshold
         self.battery_voltage_minimum = battery_voltage_minimum

@@ -160,7 +160,7 @@ class LinkedConfiguration:
                     "entity_category": "diagnostic",
                     "suggested_display_precision": 2,
                 },
-                "cpu_stat": {
+                "cpu_stat_raw": {
                     "name": "cpu_stat_raw",
                     "pretty": "CPU stat raw",
                     "type": "sensor",
@@ -170,7 +170,7 @@ class LinkedConfiguration:
                 "cpu_stat_text": {
                     "name": "cpu_stat",
                     "pretty": "CPU stat",
-                    "type": "text",
+                    "type": "sensor",
                     "entity_category": "diagnostic",
                 },
                 "battery_warning_threshold": {
