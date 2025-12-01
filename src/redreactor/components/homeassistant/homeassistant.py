@@ -148,6 +148,8 @@ class Homeassistant:
 
             if field["type"] == "text":
                 configured = Text(
+                    command_topic=f"{static_configuration['mqtt']['base_topic']}/{static_configuration['hostname']['name']}/{static_configuration['mqtt']['topic']['set']}/{field['name']}",
+                    command_template=f"{ '{{ value }}' }",
                     min=field.get("min", 0),
                     max=field.get("max", 255),
                     mode=field.get("mode", "text"),
