@@ -172,7 +172,7 @@ class LinkedConfiguration:
                     "pretty": "CPU stat",
                     "type": "sensor",
                     "entity_category": "diagnostic",
-                    "state_class": "str",
+                    "state_class": None,
                 },
                 "battery_warning_threshold": {
                     "name": "battery_warning_threshold",
