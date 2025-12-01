@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
+
+import requests
 
 
 def dict_merge(dct: Any, merge_dct: dict[str, Any]) -> None:
@@ -113,6 +117,43 @@ def read_cpu_stat_vcgencmd() -> int | None:
                 continue
 
     return None
+
+
+def read_cpu_stat_hassos() -> int | None:
+    """Read CPU throttling via HassOS (Supervisor API)."""
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        return None
+
+    url = "http://supervisor/hardware/info"
+
+    try:
+        response = requests.get(
+            url,
+            timeout=5,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        data = response.json()
+    except (requests.RequestException, ValueError, json.JSONDecodeError):
+        return None
+
+    throttling = data.get("data", {}).get("chassis", {}).get("throttling")
+
+    if not isinstance(throttling, dict):
+        return None
+
+    mask = 0
+
+    if throttling.get("under_voltage"):
+        mask |= 1 << 0
+    if throttling.get("frequency_capped"):
+        mask |= 1 << 1
+    if throttling.get("throttled"):
+        mask |= 1 << 2
+    if throttling.get("soft_temp_limit"):
+        mask |= 1 << 3
+
+    return mask
 
 
 def decode_cpu_stat_text(value: int) -> str:

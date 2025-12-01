@@ -21,6 +21,7 @@ from redreactor.helpers.emitter import EventEmitter
 from redreactor.helpers.repeater import RepeatTimer
 from redreactor.helpers.utils import (
     decode_cpu_stat_text,
+    read_cpu_stat_hassos,
     read_cpu_stat_sysfs,
     read_cpu_stat_vcgencmd,
     read_cpu_temperature_sysfs,
@@ -224,6 +225,9 @@ class Monitor:
             stat = read_cpu_stat_sysfs()
             if stat is None:
                 stat = read_cpu_stat_vcgencmd()
+
+            if stat is None:
+                stat = read_cpu_stat_hassos()
 
             self.data.cpu_stat_raw = stat
 
