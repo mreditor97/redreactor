@@ -221,7 +221,10 @@ class Monitor:
             self.data.cpu_temperature = temp
 
             # Throttled state
-            stat = read_cpu_stat_sysfs() or read_cpu_stat_vcgencmd()
+            stat = read_cpu_stat_sysfs()
+            if stat is None:
+                stat = read_cpu_stat_vcgencmd()
+
             self.data.cpu_stat_raw = stat
 
             # Decode text
