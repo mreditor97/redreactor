@@ -114,7 +114,6 @@ class Base(Representer):
 
     name: str | None
     device_class: str | None
-    state_class: str | None
     entity_category: str | None
     expire_after: int | None  # Number of seconds after state becomes unavailable
     icon: str | None
@@ -129,13 +128,12 @@ class Base(Representer):
 
     configuration_topic: (
         str | None
-    )  # Used for one time creation of the Home Assistant configuration topic # noqa: E501
+    )  # Used for one time creation of the Home Assistant configuration topic
 
     def __init__(  # noqa: PLR0913
         self,
         name: str | None = None,
         device_class: str | None = None,
-        state_class: str | None = None,
         entity_category: str | None = None,
         expire_after: int | None = None,
         icon: str | None = None,
@@ -152,7 +150,6 @@ class Base(Representer):
         """Initialise Home Assistant Base object."""
         self.name = name
         self.device_class = device_class
-        self.state_class = state_class
         self.entity_category = entity_category
         self.expire_after = expire_after
         self.icon = icon
