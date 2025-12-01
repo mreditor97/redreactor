@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from helpers import utils
 from ina219 import INA219, DeviceRangeError
 
 from redreactor.components.mqtt import MQTT
@@ -207,52 +207,38 @@ class Monitor:
             ),
         )
 
-    def _decode_cpu_stat_text(self, value: int) -> str:
-        """Decode CPU Stat information into readable text."""
-        messages = []
+    def _update_cpu_information(self) -> None:
+        """Update CPU information, including temperature and throttling."""
+        try:
+            # Temperature
+            temp = (
+                utils.read_cpu_temperature_sysfs()
+                or utils.read_cpu_temperature_vcgencmd()
+            )
+            self.data.cpu_temperature = temp
 
-        if value & (1 << 0):
-            messages.append("Under-voltage NOW")
-        if value & (1 << 1):
-            messages.append("Frequency Capped NOW")
-        if value & (1 << 2):
-            messages.append("Currently Throttled")
-        if value & (1 << 3):
-            messages.append("Soft Temp Limit NOW")
+            # Throttled state
+            stat = utils.read_cpu_stat_sysfs() or utils.read_cpu_stat_vcgencmd()
+            self.data.cpu_stat = stat
 
-        if value & (1 << 16):
-            messages.append("Under-voltage OCCURRED")
-        if value & (1 << 17):
-            messages.append("Frequency Capped OCCURRED")
-        if value & (1 << 18):
-            messages.append("Throttling OCCURRED")
-        if value & (1 << 19):
-            messages.append("Soft Temp Limit OCCURRED")
+            # Decode text
+            self.data.cpu_stat_text = (
+                utils.decode_cpu_stat_text(stat) if stat is not None else None
+            )
 
-        return ", ".join(messages) if messages else "OK"
+        except Exception:
+            self.logger.exception("Failed to read CPU Information")
+            self.data.cpu_temperature = None
+            self.data.cpu_stat = None
+            self.data.cpu_stat_text = None
 
     def _update(self) -> None:
         """Pushes the latest data to Monitor endpoint."""
         # Force a update of the dynamic configuration values
         self._update_dynamic_configuration()
 
-        # Read data from Kernel endpoints
-        try:
-            cpu_temperature_path = "/sys/class/thermal/thermal_zone0/temp"
-            with Path(cpu_temperature_path).open("r") as f:
-                cpu_temperature_milli = int(f.read().strip())
-                self.data.cpu_temperature = round(cpu_temperature_milli / 1000.0, 2)
-
-            cpu_stat_path = "/sys/devices/platform/soc/soc:firmware/get_throttled"
-            with Path(cpu_stat_path).open("r") as f:
-                self.data.cpu_stat = int(f.read().strip(), 16)
-                self.data.cpu_stat_text = self._decode_cpu_stat_text(self.data.cpu_stat)
-        except (OSError, ValueError):
-            # Failed to extract info
-            self.logger.exception("Failed to read CPU Information")
-            self.data.cpu_stat = None
-            self.data.cpu_stat_text = "Error"
-            self.data.cpu_temperature = None
+        # Update CPU information before publishing info
+        self._update_cpu_information()
 
         # Publish heartbeat to status endpoint
         MQTT.event.emit(
