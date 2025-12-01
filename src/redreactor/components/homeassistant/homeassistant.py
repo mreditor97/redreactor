@@ -146,7 +146,7 @@ class Homeassistant:
                     ),
                 )
 
-            if field["text"] == "text":
+            if field["type"] == "text":
                 configured = Text(
                     min=field.get("min", 0),
                     max=field.get("max", 255),
