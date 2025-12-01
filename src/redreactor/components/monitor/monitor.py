@@ -229,7 +229,7 @@ class Monitor:
 
             # Decode text
             self.data.cpu_stat_text = (
-                decode_cpu_stat_text(stat) if stat is not None else None
+                decode_cpu_stat_text(stat) if stat is not None else "Error"
             )
 
         except Exception:
