@@ -104,6 +104,7 @@ class Homeassistant:
                     f"{ '{{ value_json.' + str(field['name']) + ' }}' }",
                 ),
                 device=configuration_defaults,
+                enabled_by_default=field.get("enabled_by_default", True),
             )
 
             configured: Sensor | BinarySensor | Number | Button = Sensor()
