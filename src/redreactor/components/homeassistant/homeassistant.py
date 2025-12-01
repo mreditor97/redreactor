@@ -14,7 +14,6 @@ from .button import Button
 from .common import Availability, Base, Device, Encoder
 from .number import Number
 from .sensor import Sensor
-from .text import Text
 
 if TYPE_CHECKING:
     from paho.mqtt.client import Client
@@ -27,7 +26,7 @@ class Homeassistant:
 
     logger = logging.getLogger("Red Reactor")
 
-    configuration: list[Sensor | Number | BinarySensor | Button | Text] = []
+    configuration: list[Sensor | Number | BinarySensor | Button] = []
 
     _static_configuration: dict[str, Any] = {}
     _dynamic_configuration: DynamicConfiguration
@@ -107,7 +106,7 @@ class Homeassistant:
                 device=configuration_defaults,
             )
 
-            configured: Sensor | BinarySensor | Number | Button | Text = Sensor()
+            configured: Sensor | BinarySensor | Number | Button = Sensor()
             if field["type"] == "sensor":
                 configured = Sensor(
                     unit_of_measurement=field.get("unit", None),
@@ -144,15 +143,6 @@ class Homeassistant:
                         "payload_press",
                         json.dumps(True),  # noqa: FBT003
                     ),
-                )
-
-            if field["type"] == "text":
-                configured = Text(
-                    command_topic=f"{static_configuration['mqtt']['base_topic']}/{static_configuration['hostname']['name']}/{static_configuration['mqtt']['topic']['set']}/{field['name']}",
-                    command_template=f"{ '{{ value }}' }",
-                    min=field.get("min", 0),
-                    max=field.get("max", 255),
-                    mode=field.get("mode", "text"),
                 )
 
             # Merge the configurations

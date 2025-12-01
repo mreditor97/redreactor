@@ -55,7 +55,7 @@ class Monitor:
         battery_level=100,
         external_power=True,
         cpu_temperature=0.0,
-        cpu_stat=0,
+        cpu_stat_raw=0,
         cpu_stat_text="OK",
         battery_warning_threshold=DEFAULT_BATTERY_WARNING_THRESHOLD,
         battery_voltage_minimum=DEFAULT_BATTERY_VOLTAGE_MINIMUM,
@@ -222,7 +222,7 @@ class Monitor:
 
             # Throttled state
             stat = read_cpu_stat_sysfs() or read_cpu_stat_vcgencmd()
-            self.data.cpu_stat = stat
+            self.data.cpu_stat_raw = stat
 
             # Decode text
             self.data.cpu_stat_text = (
@@ -232,7 +232,7 @@ class Monitor:
         except Exception:
             self.logger.exception("Failed to read CPU Information")
             self.data.cpu_temperature = None
-            self.data.cpu_stat = None
+            self.data.cpu_stat_raw = None
             self.data.cpu_stat_text = None
 
     def _update(self) -> None:
@@ -279,7 +279,7 @@ class Monitor:
                         )
                     ),
                     f"{self._static_configuration['fields']['cpu_temperature']['name']}": self.data.cpu_temperature,  # noqa: E501
-                    f"{self._static_configuration['fields']['cpu_stat']['name']}": self.data.cpu_stat,  # noqa: E501
+                    f"{self._static_configuration['fields']['cpu_stat_raw']['name']}": self.data.cpu_stat_raw,  # noqa: E501
                     f"{self._static_configuration['fields']['cpu_stat_text']['name']}": self.data.cpu_stat_text,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_warning_threshold']['name']}": self.data.battery_warning_threshold,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_voltage_minimum']['name']}": self.data.battery_voltage_minimum,  # noqa: E501
