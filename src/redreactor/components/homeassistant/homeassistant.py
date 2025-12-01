@@ -83,7 +83,6 @@ class Homeassistant:
             configuring: Base = Base(
                 name=f"{field.get('pretty')}",
                 device_class=field.get("device_class", None),
-                state_class="measurement",
                 expire_after=int(static_configuration["homeassistant"]["expire_after"]),
                 entity_category=field.get("entity_category", None),
                 icon=field.get("icon", None),
@@ -104,6 +103,7 @@ class Homeassistant:
                     f"{ '{{ value_json.' + str(field['name']) + ' }}' }",
                 ),
                 device=configuration_defaults,
+                enabled_by_default=field.get("enabled_by_default", True),
             )
 
             configured: Sensor | BinarySensor | Number | Button = Sensor()
@@ -114,7 +114,7 @@ class Homeassistant:
                         "suggested_display_precision",
                         None,
                     ),
-                    state_class=field.get("state_class", None),
+                    state_class=field.get("state_class", "measurement"),
                 )
 
             if field["type"] == "binary_sensor":

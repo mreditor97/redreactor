@@ -86,7 +86,7 @@ class Commander:
 
     def _on_message(
         self,
-        client_id: str,  # noqa: ARG002
+        client: Client,  # noqa: ARG002
         userdata: Any,  # noqa: ARG002
         message: MQTTMessage,
     ) -> None:
