@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from ina219 import INA219, DeviceRangeError
 
+from redreactor.components.monitor.data import MonitorData
 from redreactor.components.mqtt import MQTT
 from redreactor.const import (
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
@@ -17,18 +18,13 @@ from redreactor.const import (
     DEFAULT_BATTERY_WARNING_THRESHOLD,
     DEFAULT_REPORT_INTERVAL,
 )
+from redreactor.helpers.cpu_utils import (
+    decode_cpu_stat_text,
+    read_cpu_stat,
+    read_cpu_temperature,
+)
 from redreactor.helpers.emitter import EventEmitter
 from redreactor.helpers.repeater import RepeatTimer
-from redreactor.helpers.utils import (
-    decode_cpu_stat_text,
-    read_cpu_stat_hassos,
-    read_cpu_stat_sysfs,
-    read_cpu_stat_vcgencmd,
-    read_cpu_temperature_sysfs,
-    read_cpu_temperature_vcgencmd,
-)
-
-from .data import MonitorData
 
 if TYPE_CHECKING:
     from paho.mqtt.client import Client
@@ -218,22 +214,16 @@ class Monitor:
         """Update CPU information, including temperature and throttling."""
         try:
             # Temperature
-            temp = read_cpu_temperature_sysfs() or read_cpu_temperature_vcgencmd()
-            self.data.cpu_temperature = temp
+            self.data.cpu_temperature = read_cpu_temperature()
 
             # Throttled state
-            stat = read_cpu_stat_sysfs()
-            if stat is None:
-                stat = read_cpu_stat_vcgencmd()
-
-            if stat is None:
-                stat = read_cpu_stat_hassos()
-
-            self.data.cpu_stat_raw = stat
+            self.data.cpu_stat_raw = read_cpu_stat()
 
             # Decode text
             self.data.cpu_stat_text = (
-                decode_cpu_stat_text(stat) if stat is not None else "Error"
+                decode_cpu_stat_text(self.data.cpu_stat_raw)
+                if self.data.cpu_stat_raw is not None
+                else "Error"
             )
 
         except Exception:
