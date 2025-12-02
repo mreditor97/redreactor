@@ -181,7 +181,7 @@ def read_cpu_stat_inferred() -> int | None:
     current_temp = _read_int(THERMAL_BASE / "temp")
     trip0_temp = _read_int(THERMAL_BASE / "trip_point_0_temp")
 
-    # Return None if ALL data is missing (SIM102 clean)
+    # Return None if ALL data is missing
     if all(
         v is None
         for v in (current_freq, scaling_max, cpuinfo_max, current_temp, trip0_temp)
@@ -190,7 +190,7 @@ def read_cpu_stat_inferred() -> int | None:
 
     mask = 0
 
-    # BIT 1: Frequency capped (merged for SIM102)
+    # BIT 1: Frequency capped
     if (
         cpuinfo_max is not None
         and scaling_max is not None
@@ -198,7 +198,7 @@ def read_cpu_stat_inferred() -> int | None:
     ):
         mask |= 1 << FREQ_CAPPED_BIT
 
-    # BIT 3: Soft thermal throttle (merged for SIM102)
+    # BIT 3: Soft thermal throttle
     if (
         current_temp is not None
         and trip0_temp is not None
@@ -206,7 +206,7 @@ def read_cpu_stat_inferred() -> int | None:
     ):
         mask |= 1 << SOFT_TEMP_LIMIT_BIT
 
-    return mask or None
+    return mask
 
 
 def read_cpu_stat() -> int | None:
