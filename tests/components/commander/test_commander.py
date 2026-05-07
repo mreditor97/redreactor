@@ -169,7 +169,7 @@ def test_on_message_unknown_topic_logs_warning(commander, static_config):
 
 
 def test_on_command_shutdown_emits_publish_and_exits(commander):
-    """_on_command('shutdown') emits publish, calls os.system, and sys.exit."""
+    """_on_command('shutdown') emits publish, calls subprocess.run, and sys.exit."""
     cmd, _ = commander
     from redreactor.components.mqtt import MQTT
 
@@ -179,18 +179,17 @@ def test_on_command_shutdown_emits_publish_and_exits(commander):
         lambda topic, payload: publish_calls.append((topic, payload)),
     )
 
-    with patch("os.system") as mock_os, \
-         patch("sys.exit") as mock_exit, \
-         patch("time.sleep"):
+    target = "redreactor.components.commander.commander.subprocess.run"
+    with patch(target) as mock_run, patch("sys.exit") as mock_exit, patch("time.sleep"):
         cmd._on_command("shutdown")
 
     assert publish_calls, "publish event was not emitted"
-    mock_os.assert_called_once()
+    mock_run.assert_called_once()
     mock_exit.assert_called_once_with(0)
 
 
 def test_on_command_restart_emits_publish_and_exits(commander):
-    """_on_command('restart') emits publish, calls os.system, and sys.exit."""
+    """_on_command('restart') emits publish, calls subprocess.run, and sys.exit."""
     cmd, _ = commander
     from redreactor.components.mqtt import MQTT
 
@@ -200,13 +199,12 @@ def test_on_command_restart_emits_publish_and_exits(commander):
         lambda topic, payload: publish_calls.append((topic, payload)),
     )
 
-    with patch("os.system") as mock_os, \
-         patch("sys.exit") as mock_exit, \
-         patch("time.sleep"):
+    target = "redreactor.components.commander.commander.subprocess.run"
+    with patch(target) as mock_run, patch("sys.exit") as mock_exit, patch("time.sleep"):
         cmd._on_command("restart")
 
     assert publish_calls
-    mock_os.assert_called_once()
+    mock_run.assert_called_once()
     mock_exit.assert_called_once_with(0)
 
 
