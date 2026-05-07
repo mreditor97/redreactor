@@ -141,6 +141,24 @@ lint.ignore = [
 ]
 lint.select = ["ALL"]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+  "S101",    # assert is normal in tests
+  "ANN001",  # no type annotations needed in test args
+  "ANN002",
+  "ANN201",  # no return type needed for test funcs
+  "ANN202",
+  "D100",    # missing module docstring
+  "D101",
+  "D102",
+  "D103",
+  "D104",    # missing docstring in public package
+  "PLC0415", # imports inside fixtures are fine
+  "INP001",  # tests/ is not a namespace package
+  "SLF001",  # private member access is normal in unit tests
+  "ERA001",  # section separator comments look like commented code to ruff
+]
+
 [lint.flake8-pytest-style]
 fixture-parentheses = false
 mark-parentheses = false
