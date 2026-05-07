@@ -179,9 +179,8 @@ def test_on_command_shutdown_emits_publish_and_exits(commander):
         lambda topic, payload: publish_calls.append((topic, payload)),
     )
 
-    with patch("redreactor.components.commander.commander.subprocess.run") as mock_run, \
-         patch("sys.exit") as mock_exit, \
-         patch("time.sleep"):
+    target = "redreactor.components.commander.commander.subprocess.run"
+    with patch(target) as mock_run, patch("sys.exit") as mock_exit, patch("time.sleep"):
         cmd._on_command("shutdown")
 
     assert publish_calls, "publish event was not emitted"
@@ -200,9 +199,8 @@ def test_on_command_restart_emits_publish_and_exits(commander):
         lambda topic, payload: publish_calls.append((topic, payload)),
     )
 
-    with patch("redreactor.components.commander.commander.subprocess.run") as mock_run, \
-         patch("sys.exit") as mock_exit, \
-         patch("time.sleep"):
+    target = "redreactor.components.commander.commander.subprocess.run"
+    with patch(target) as mock_run, patch("sys.exit") as mock_exit, patch("time.sleep"):
         cmd._on_command("restart")
 
     assert publish_calls
