@@ -331,11 +331,11 @@ class Monitor:
 
     def _mqtt_on_connect(
         self,
-        client: Client,  # noqa: ARG002
-        userdata: Any,  # noqa: ARG002
-        flags: Any,  # noqa: ARG002
-        rc: Any,  # noqa: ARG002
-        reasoncode: Any = None,  # noqa: ARG002
+        _client: Client,
+        _userdata: Any,
+        _flags: Any,
+        _rc: Any,
+        _reasoncode: Any = None,
     ) -> None:
         """On MQTT Connect.
 

@@ -77,8 +77,8 @@ class Homeassistant:
             sw_version="1.0.0",
         )
 
-        for field in static_configuration["fields"]:
-            field = static_configuration["fields"][field]  # noqa: PLW2901
+        for field_key in static_configuration["fields"]:
+            field = static_configuration["fields"][field_key]
 
             configuring: Base = Base(
                 name=f"{field.get('pretty')}",
@@ -177,11 +177,11 @@ class Homeassistant:
 
     def _mqtt_on_connect(
         self,
-        client: Client,  # noqa: ARG002
-        userdata: Any,  # noqa: ARG002
-        flags: Any,  # noqa: ARG002
-        rc: Any,  # noqa: ARG002
-        reasoncode: Any = None,  # noqa: ARG002
+        _client: Client,
+        _userdata: Any,
+        _flags: Any,
+        _rc: Any,
+        _reasoncode: Any = None,
     ) -> None:
         """On MQTT Connect, publish Home Assistant configuration."""
         self._update_homeassistant_configuration()
