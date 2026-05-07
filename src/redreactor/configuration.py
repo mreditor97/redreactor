@@ -30,13 +30,14 @@ class DynamicConfiguration:
 
     data: dict[str, Any]
 
-    event: EventEmitter = EventEmitter()
+    event: EventEmitter
 
     _dynamic_file: str
 
     def __init__(self, dynamic_file: str) -> None:
         """Initialise the Dynamic Configuration object."""
         self._dynamic_file = dynamic_file
+        self.event = EventEmitter()
 
         self.data = self._load()
 
