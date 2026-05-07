@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
+import shlex
+import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal
 
 from redreactor.components.mqtt import MQTT
@@ -57,10 +58,10 @@ class Commander:
     def _on_connect(
         self,
         client: Client,
-        userdata: Any,  # noqa: ARG002
-        flags: Any,  # noqa: ARG002
-        rc: Any,  # noqa: ARG002
-        reasoncode: Any = None,  # noqa: ARG002
+        _userdata: Any,
+        _flags: Any,
+        _rc: Any,
+        _reasoncode: Any = None,
     ) -> None:
         """Process Commander subscriptions on MQTT connect event."""
         # Loop through all available field options
@@ -86,8 +87,8 @@ class Commander:
 
     def _on_message(
         self,
-        client: Client,  # noqa: ARG002
-        userdata: Any,  # noqa: ARG002
+        _client: Client,
+        _userdata: Any,
         message: MQTTMessage,
     ) -> None:
         """Process Commander messages on MQTT message event."""
@@ -157,7 +158,7 @@ class Commander:
         self.logger.info(
             "Device %s has been called. Last running at %s",
             event_type,
-            datetime.now().strftime("%H:%M:%S"),  # noqa: DTZ005
+            datetime.now(tz=timezone.utc).strftime("%H:%M:%S"),
         )
 
         # Publish to MQTT the offline state, before shutting down or restarting
@@ -170,8 +171,9 @@ class Commander:
         # Ensure the MQTT data has been published to the broker
         time.sleep(2)
 
-        # Initiate event type (shutdown or restart)
-        os.system(self._static_configuration["system"][event_type])  # noqa: S605
+        # Command comes from trusted user-controlled YAML config, not external input
+        cmd = shlex.split(self._static_configuration["system"][event_type])
+        subprocess.run(cmd, check=False)  # noqa: S603
 
         # Exit the program
         sys.exit(0)

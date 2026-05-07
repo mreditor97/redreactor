@@ -6,7 +6,7 @@ Contains the ability to read the static and dynamic configuration files.
 from __future__ import annotations
 
 import json
-import os
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -51,18 +51,19 @@ class DynamicConfiguration:
             "battery_voltage_maximum": DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
         }
 
-        if not os.path.exists(self._dynamic_file):  # noqa: PTH110
-            with open(self._dynamic_file, "w") as file:  # noqa: PTH123
+        dynamic_path = Path(self._dynamic_file)
+        if not dynamic_path.exists():
+            with dynamic_path.open("w") as file:
                 json.dump(dynamic_file_defaults, file)
 
-        with open(self._dynamic_file) as file:  # noqa: PTH123
+        with dynamic_path.open() as file:
             dynamic_file_override = json.load(file)
 
         return {**dynamic_file_defaults, **dynamic_file_override}
 
     def write(self) -> None:
         """Write dynamic configuration file."""
-        with open(self._dynamic_file, "w") as file:  # noqa: PTH123
+        with Path(self._dynamic_file).open("w") as file:
             json.dump(self.data, file)
 
 
@@ -88,7 +89,7 @@ class LinkedConfiguration:
 
     def _load(self) -> dict[str, Any]:
         """Load static configuration file, and override defaults."""
-        with open(self._static_file) as static_file:  # noqa: PTH123
+        with Path(self._static_file).open() as static_file:
             static_file_override = yaml.safe_load(static_file)
 
         static_file_defaults = {
