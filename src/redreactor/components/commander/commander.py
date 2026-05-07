@@ -112,9 +112,7 @@ class Commander:
             # If the received command is of type button
             if (
                 self._static_configuration["fields"][field]["type"]
-                in {
-                    "button",
-                }
+                == "button"
                 and field in topic
             ):
                 self.logger.info(
@@ -127,9 +125,7 @@ class Commander:
             # If the received command is of type number
             if (
                 self._static_configuration["fields"][field]["type"]
-                in {
-                    "number",
-                }
+                == "number"
                 and field in topic
             ):
                 self.logger.info(
