@@ -28,7 +28,7 @@ class Commander:
 
     logger = logging.getLogger("Red Reactor")
 
-    event: EventEmitter = EventEmitter()
+    event: EventEmitter
 
     _static_configuration: dict[str, Any] = {}
     _dynamic_configuration: DynamicConfiguration
@@ -41,6 +41,7 @@ class Commander:
         monitor: Monitor,
     ) -> None:
         """Initialise the Commander object."""
+        self.event = EventEmitter()
         self._static_configuration = static_configuration
         self._dynamic_configuration = dynamic_configuration
         self._monitor = monitor

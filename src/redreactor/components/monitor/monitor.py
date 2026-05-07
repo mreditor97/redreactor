@@ -40,25 +40,13 @@ class Monitor:
 
     logger = logging.getLogger("Red Reactor")
 
-    event: EventEmitter = EventEmitter()
+    event: EventEmitter
 
     _static_configuration: dict[str, Any]
     _dynamic_configuration: DynamicConfiguration
 
     # Adds default values into the Monitor Data dict
-    data: MonitorData = MonitorData(
-        voltage=0.0,
-        current=0.0,
-        battery_level=100,
-        external_power=True,
-        cpu_temperature=0.0,
-        cpu_stat_raw=0,
-        cpu_stat_text="OK",
-        battery_warning_threshold=DEFAULT_BATTERY_WARNING_THRESHOLD,
-        battery_voltage_minimum=DEFAULT_BATTERY_VOLTAGE_MINIMUM,
-        battery_voltage_maximum=DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
-        report_interval=DEFAULT_REPORT_INTERVAL,
-    )
+    data: MonitorData
 
     # Timers
     monitor_timer: RepeatTimer  # Runs Monitoring calculations
@@ -70,6 +58,20 @@ class Monitor:
         dynamic_configuration: DynamicConfiguration,
     ) -> None:
         """Initialise Monitor object."""
+        self.event = EventEmitter()
+        self.data = MonitorData(
+            voltage=0.0,
+            current=0.0,
+            battery_level=100,
+            external_power=True,
+            cpu_temperature=0.0,
+            cpu_stat_raw=0,
+            cpu_stat_text="OK",
+            battery_warning_threshold=DEFAULT_BATTERY_WARNING_THRESHOLD,
+            battery_voltage_minimum=DEFAULT_BATTERY_VOLTAGE_MINIMUM,
+            battery_voltage_maximum=DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
+            report_interval=DEFAULT_REPORT_INTERVAL,
+        )
         self._static_configuration = static_configuration
         self._dynamic_configuration = dynamic_configuration
 
@@ -115,7 +117,7 @@ class Monitor:
         )
         self.monitor_timer.start()
 
-    def _monitor(self, ina: INA219) -> None:  # noqa: C901
+    def _monitor(self, ina: INA219) -> None:  # noqa: C901, PLR0912
         """Monitor INA Thread Loop.
 
         Gets called every 'monitor_interval'.
@@ -160,8 +162,10 @@ class Monitor:
                         self.data.external_power = False
                         self._update()
                 elif self.data.current >= 0:
-                    # Battery now Full
-                    self.data.external_power = True
+                    if not self.data.external_power:
+                        # Power restored (battery full / float charge)
+                        self.data.external_power = True
+                        self._update()
                 elif not self.data.external_power:
                     # Power restored
                     self.data.external_power = True
