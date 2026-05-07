@@ -8,9 +8,7 @@ from redreactor.components.homeassistant.common import (
     Availability,
     Device,
     Encoder,
-    Representer,
 )
-
 
 # ---------------------------------------------------------------------------
 # Availability
@@ -96,7 +94,7 @@ def test_encoder_omits_none_values():
     data = json.loads(result)
     assert "name" in data
     # All other None fields should be absent
-    for key, value in data.items():
+    for value in data.values():
         assert value is not None
 
 
@@ -118,5 +116,5 @@ def test_representer_repr_omits_none_values():
     """Representer.__repr__ excludes None values."""
     avail = Availability(topic="test/topic")
     result = repr(avail)
-    # payload_available is None — should not appear
+    # payload_available is None --- should not appear
     assert "payload_available" not in result

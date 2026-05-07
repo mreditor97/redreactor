@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
-import pytest
 import yaml
 
 from redreactor.configuration import DynamicConfiguration, LinkedConfiguration
@@ -14,7 +14,6 @@ from redreactor.const import (
     DEFAULT_BATTERY_WARNING_THRESHOLD,
     DEFAULT_REPORT_INTERVAL,
 )
-
 
 # ---------------------------------------------------------------------------
 # DynamicConfiguration
@@ -58,7 +57,7 @@ def test_dynamic_config_write_persists_data(tmp_path):
     config.data["report_interval"] = 999
     config.write()
 
-    with open(dynamic_file) as f:
+    with Path(dynamic_file).open() as f:
         saved = json.load(f)
 
     assert saved["report_interval"] == 999

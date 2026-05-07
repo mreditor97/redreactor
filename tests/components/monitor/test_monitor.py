@@ -2,18 +2,17 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from redreactor.components.monitor.data import MonitorData
 from redreactor.const import (
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
-    DEFAULT_BATTERY_VOLTAGE_MINIMUM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
+    DEFAULT_BATTERY_VOLTAGE_MINIMUM,
 )
 from redreactor.helpers.emitter import EventEmitter
-
 
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
@@ -38,7 +37,10 @@ def _make_monitor(static_config, dynamic_config, mock_ina_instance):
     MQTT.event = EventEmitter()
 
     # Patch at the module where INA219 is imported (the monitor module)
-    with patch("redreactor.components.monitor.monitor.INA219", return_value=mock_ina_instance):
+    with patch(
+        "redreactor.components.monitor.monitor.INA219",
+        return_value=mock_ina_instance,
+    ):
         monitor = Monitor(
             static_configuration=static_config,
             dynamic_configuration=dynamic_config,
@@ -99,8 +101,8 @@ def test_calculate_battery_level_at_maximum(monitor):
     """Voltage at or above effective max should give 100%."""
     monitor.data.battery_voltage_minimum = DEFAULT_BATTERY_VOLTAGE_MINIMUM
     monitor.data.battery_voltage_maximum = DEFAULT_BATTERY_VOLTAGE_MAXIMUM
-    effective_max = DEFAULT_BATTERY_VOLTAGE_MAXIMUM - DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP
-    result = monitor._calculate_battery_level(effective_max)
+    v_max = DEFAULT_BATTERY_VOLTAGE_MAXIMUM - DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP
+    result = monitor._calculate_battery_level(v_max)
     assert result == 100
 
 
@@ -135,14 +137,14 @@ def test_calculate_battery_level_below_min_clamped(monitor):
 
 
 def _run_monitor_with_ina(monitor, ina_mock, voltage=3.7, current=-50.0):
-    """Helper to run _monitor with a configured INA mock."""
+    """Run _monitor with a configured INA mock."""
     ina_mock.voltage.return_value = voltage
     ina_mock.current.return_value = current
     monitor._monitor(ina=ina_mock)
 
 
 def test_monitor_high_current_sets_external_power_false(monitor, mock_ina):
-    """current > 10 sets external_power=False when it was True."""
+    """Current > 10 sets external_power=False when it was True."""
     monitor.data.external_power = True
     with patch.object(monitor, "_update"):
         _run_monitor_with_ina(monitor, mock_ina, voltage=3.7, current=50.0)
@@ -150,7 +152,7 @@ def test_monitor_high_current_sets_external_power_false(monitor, mock_ina):
 
 
 def test_monitor_zero_to_ten_current_sets_external_power_true(monitor, mock_ina):
-    """current in [0, 10] sets external_power=True."""
+    """Current in [0, 10] sets external_power=True."""
     monitor.data.external_power = False
     with patch.object(monitor, "_update"):
         _run_monitor_with_ina(monitor, mock_ina, voltage=3.7, current=5.0)
@@ -165,9 +167,7 @@ def test_monitor_negative_current_sets_external_power_true(monitor, mock_ina):
     assert monitor.data.external_power is True
 
 
-def test_monitor_device_range_error_sets_external_power_false(
-    monitor, mock_ina, static_config
-):
+def test_monitor_device_range_error_sets_external_power_false(monitor, mock_ina):
     """DeviceRangeError sets external_power=False and current=6000."""
     from ina219 import DeviceRangeError
 
@@ -186,7 +186,7 @@ def test_monitor_device_range_error_sets_external_power_false(
 def test_monitor_battery_zero_no_external_power_emits_shutdown(monitor, mock_ina):
     """battery_level == 0 and not external_power emits 'shutdown' event."""
     mock_ina.voltage.return_value = DEFAULT_BATTERY_VOLTAGE_MINIMUM
-    mock_ina.current.return_value = 50.0  # High current → no external power
+    mock_ina.current.return_value = 50.0  # High current no external power
 
     monitor.data.battery_voltage_minimum = DEFAULT_BATTERY_VOLTAGE_MINIMUM
     monitor.data.battery_voltage_maximum = DEFAULT_BATTERY_VOLTAGE_MAXIMUM
@@ -208,7 +208,7 @@ def test_monitor_voltage_above_max_forces_external_power(monitor, mock_ina):
 
     high_voltage = DEFAULT_BATTERY_VOLTAGE_MAXIMUM + 0.10
     mock_ina.voltage.return_value = high_voltage
-    mock_ina.current.return_value = -50.0  # negative → power is on
+    mock_ina.current.return_value = -50.0  # negative power is on
 
     with patch.object(monitor, "_update"):
         monitor._monitor(ina=mock_ina)

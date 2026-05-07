@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from redreactor.helpers.cpu_utils import (
     decode_cpu_stat_text,
     read_cpu_stat_hassos,
@@ -17,7 +15,6 @@ from redreactor.helpers.cpu_utils import (
     read_cpu_temperature_sysfs,
     read_cpu_temperature_vcgencmd,
 )
-
 
 # ---------------------------------------------------------------------------
 # read_cpu_temperature_sysfs
@@ -79,7 +76,7 @@ def test_read_cpu_temperature_vcgencmd_returns_none_when_absent():
 def test_read_cpu_temperature_uses_sysfs_when_available():
     """read_cpu_temperature returns sysfs value when sysfs is available."""
     with patch(
-        "redreactor.helpers.cpu_utils.read_cpu_temperature_sysfs", return_value=50.0
+        "redreactor.helpers.cpu_utils.read_cpu_temperature_sysfs", return_value=50.0,
     ):
         result = read_cpu_temperature()
     assert result == 50.0
@@ -88,9 +85,9 @@ def test_read_cpu_temperature_uses_sysfs_when_available():
 def test_read_cpu_temperature_falls_back_to_vcgencmd():
     """read_cpu_temperature falls back to vcgencmd when sysfs returns None."""
     with patch(
-        "redreactor.helpers.cpu_utils.read_cpu_temperature_sysfs", return_value=None
+        "redreactor.helpers.cpu_utils.read_cpu_temperature_sysfs", return_value=None,
     ), patch(
-        "redreactor.helpers.cpu_utils.read_cpu_temperature_vcgencmd", return_value=55.3
+        "redreactor.helpers.cpu_utils.read_cpu_temperature_vcgencmd", return_value=55.3,
     ):
         result = read_cpu_temperature()
     assert result == 55.3
@@ -169,9 +166,9 @@ def test_read_cpu_stat_hassos_parses_throttling(monkeypatch):
                     "frequency_capped": False,
                     "throttled": False,
                     "soft_temp_limit": False,
-                }
-            }
-        }
+                },
+            },
+        },
     }
 
     with patch("requests.get", return_value=mock_response):
@@ -199,7 +196,7 @@ def test_read_cpu_stat_hassos_returns_none_on_missing_key(monkeypatch):
 
 
 def test_read_cpu_stat_inferred_freq_capped_bit():
-    """read_cpu_stat_inferred sets freq_capped bit when scaling_max < 95% of cpuinfo_max."""
+    """read_cpu_stat_inferred sets freq_capped bit when scaling_max is low."""
     with patch(
         "redreactor.helpers.cpu_utils._read_int",
         side_effect=lambda p: {
@@ -217,7 +214,7 @@ def test_read_cpu_stat_inferred_freq_capped_bit():
 
 
 def test_read_cpu_stat_inferred_soft_temp_bit():
-    """read_cpu_stat_inferred sets soft_temp_limit bit when current_temp >= trip0_temp."""
+    """read_cpu_stat_inferred sets soft_temp_limit bit when temp exceeds trip point."""
     with patch(
         "redreactor.helpers.cpu_utils._read_int",
         side_effect=lambda p: {
@@ -225,7 +222,7 @@ def test_read_cpu_stat_inferred_soft_temp_bit():
             "scaling_max_freq": 1000000,
             "cpuinfo_max_freq": 1000000,
             "temp": 80000,
-            "trip_point_0_temp": 80000,  # Equal → triggers soft temp
+            "trip_point_0_temp": 80000,  # Equal triggers soft temp
         }.get(p.name),
     ):
         result = read_cpu_stat_inferred()

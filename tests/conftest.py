@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -12,7 +11,7 @@ from redreactor.configuration import DynamicConfiguration
 
 @pytest.fixture
 def static_config():
-    """Return the default static config dict (mirrors LinkedConfiguration._load defaults)."""
+    """Return the default static config dict."""
     return {
         "mqtt": {
             "broker": "127.0.0.1",

@@ -9,7 +9,6 @@ import pytest
 
 from redreactor.helpers.emitter import EventEmitter
 
-
 # ---------------------------------------------------------------------------
 # Helpers / fixtures
 # ---------------------------------------------------------------------------
@@ -26,8 +25,8 @@ def _make_mock_message(topic: str, payload: str) -> MagicMock:
 @pytest.fixture(autouse=True)
 def reset_mqtt_and_monitor_events():
     """Reset class-level EventEmitters on MQTT and Monitor before each test."""
-    from redreactor.components.mqtt import MQTT
     from redreactor.components.monitor.monitor import Monitor
+    from redreactor.components.mqtt import MQTT
 
     MQTT.event = EventEmitter()
     Monitor.event = EventEmitter()
@@ -65,7 +64,9 @@ def test_on_connect_subscribes_to_button_and_number_fields(commander, static_con
 
     cmd._on_connect(mock_client, None, None, 0)
 
-    subscribed_topics = [call.kwargs["topic"] for call in mock_client.subscribe.call_args_list]
+    subscribed_topics = [
+        call.kwargs["topic"] for call in mock_client.subscribe.call_args_list
+    ]
 
     # Should subscribe to button fields (restart, shutdown) and number fields
     base = static_config["mqtt"]["base_topic"]
@@ -75,11 +76,12 @@ def test_on_connect_subscribes_to_button_and_number_fields(commander, static_con
     for field_name, field in static_config["fields"].items():
         if field["type"] in {"button", "number"}:
             expected = f"{base}/{host}/{set_topic}/{field['name']}"
-            assert expected in subscribed_topics, f"Missing subscription for {field_name}"
+            missing = f"Missing subscription for {field_name}"
+            assert expected in subscribed_topics, missing
 
 
 # ---------------------------------------------------------------------------
-# _on_message — button field
+# _on_message --- button field
 # ---------------------------------------------------------------------------
 
 
@@ -100,11 +102,11 @@ def test_on_message_button_calls_on_command(commander, static_config):
 
 
 # ---------------------------------------------------------------------------
-# _on_message — number field
+# _on_message --- number field
 # ---------------------------------------------------------------------------
 
 
-def test_on_message_number_updates_dynamic_config(commander, static_config, dynamic_config):
+def test_on_message_number_updates_dynamic_config(commander, static_config):
     """_on_message with a number topic updates dynamic_config.data."""
     cmd, _ = commander
     base = static_config["mqtt"]["base_topic"]
@@ -120,7 +122,7 @@ def test_on_message_number_updates_dynamic_config(commander, static_config, dyna
 
 
 # ---------------------------------------------------------------------------
-# _on_message — invalid JSON
+# _on_message --- invalid JSON
 # ---------------------------------------------------------------------------
 
 
@@ -141,7 +143,7 @@ def test_on_message_invalid_json_logs_warning(commander, static_config):
 
 
 # ---------------------------------------------------------------------------
-# _on_message — unknown topic
+# _on_message --- unknown topic
 # ---------------------------------------------------------------------------
 
 
@@ -166,13 +168,16 @@ def test_on_message_unknown_topic_logs_warning(commander, static_config):
 # ---------------------------------------------------------------------------
 
 
-def test_on_command_shutdown_emits_publish_and_exits(commander, static_config):
+def test_on_command_shutdown_emits_publish_and_exits(commander):
     """_on_command('shutdown') emits publish, calls os.system, and sys.exit."""
     cmd, _ = commander
     from redreactor.components.mqtt import MQTT
 
-    publish_calls = []
-    MQTT.event.on("publish", lambda topic, payload: publish_calls.append((topic, payload)))
+    publish_calls: list[tuple[str, str]] = []
+    MQTT.event.on(
+        "publish",
+        lambda topic, payload: publish_calls.append((topic, payload)),
+    )
 
     with patch("os.system") as mock_os, \
          patch("sys.exit") as mock_exit, \
@@ -184,13 +189,16 @@ def test_on_command_shutdown_emits_publish_and_exits(commander, static_config):
     mock_exit.assert_called_once_with(0)
 
 
-def test_on_command_restart_emits_publish_and_exits(commander, static_config):
+def test_on_command_restart_emits_publish_and_exits(commander):
     """_on_command('restart') emits publish, calls os.system, and sys.exit."""
     cmd, _ = commander
     from redreactor.components.mqtt import MQTT
 
-    publish_calls = []
-    MQTT.event.on("publish", lambda topic, payload: publish_calls.append((topic, payload)))
+    publish_calls: list[tuple[str, str]] = []
+    MQTT.event.on(
+        "publish",
+        lambda topic, payload: publish_calls.append((topic, payload)),
+    )
 
     with patch("os.system") as mock_os, \
          patch("sys.exit") as mock_exit, \
@@ -206,5 +214,5 @@ def test_on_command_invalid_raises_value_error(commander):
     """_on_command with an invalid event_type raises ValueError."""
     cmd, _ = commander
 
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Invalid device command"):
         cmd._on_command("invalid")
