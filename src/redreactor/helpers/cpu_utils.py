@@ -9,16 +9,21 @@ from pathlib import Path
 
 import requests
 
+# Bit positions in the Raspberry Pi firmware throttling bitmask.
+# Bits 0-3 reflect the CURRENT state; bits 16-19 reflect whether the condition
+# has OCCURRED at any point since the last reboot (sticky history flags).
 UNDER_VOLTAGE_BIT = 0
 FREQ_CAPPED_BIT = 1
 THROTTLED_BIT = 2
 SOFT_TEMP_LIMIT_BIT = 3
 
+# Ordered by likelihood — the standard sysfs path is tried first.
 SYSFS_TEMP_PATHS = [
     Path("/sys/class/thermal/thermal_zone0/temp"),
     Path("/sys/devices/virtual/thermal/thermal_zone0/temp"),
 ]
 
+# Path varies across Pi hardware revisions and kernel versions.
 SYSFS_THROTTLE_PATHS = [
     Path("/sys/devices/platform/soc/soc:firmware/get_throttled"),
     Path("/sys/devices/platform/scb/soc:firmware/get_throttled"),
@@ -190,7 +195,8 @@ def read_cpu_stat_inferred() -> int | None:
 
     mask = 0
 
-    # BIT 1: Frequency capped
+    # BIT 1: Frequency capped — scaling_max more than 5% below the hardware
+    # ceiling is a reliable sign that the governor has imposed a cap.
     if (
         cpuinfo_max is not None
         and scaling_max is not None
@@ -236,6 +242,7 @@ def decode_cpu_stat_text(value: int) -> str:
     if value & (1 << SOFT_TEMP_LIMIT_BIT):
         messages.append("Soft temp limit NOW")
 
+    # +16 accesses the sticky "has occurred since boot" history flags.
     if value & (1 << (UNDER_VOLTAGE_BIT + 16)):
         messages.append("Under-voltage OCCURRED")
     if value & (1 << (FREQ_CAPPED_BIT + 16)):

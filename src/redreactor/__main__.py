@@ -43,10 +43,12 @@ def main() -> None:
     """Start Red Reactor Battery Monitor service."""
     args = get_arguments()
 
-    # Create logger, enable all msgs
     logger = logging.getLogger("Red Reactor")
-    # Set to stop INA219 logging
+    # Prevent INA219's internal logger (which shares the root logger) from
+    # duplicating our messages up the hierarchy.
     logger.propagate = False
+    # Root level is INFO so all handlers receive every message; each handler
+    # then applies its own level from the config file (set below).
     logger.setLevel(logging.INFO)
 
     # Create handlers
@@ -92,23 +94,24 @@ def main() -> None:
             configuration.static["logging"]["file"],
         )
 
-    # Setup MQTT Connection
+    # Components register their callbacks on MQTT.event during __init__, so
+    # they must all be constructed before mqtt.connect() is called.
     mqtt = MQTT(
         configuration.static,
         exit_on_fail=bool(configuration.static["mqtt"]["exit_on_fail"]),
     )
 
-    # Setup INA216 Battery Monitoring
+    # Setup INA219 Battery Monitoring
     monitor = Monitor(configuration.static, configuration.dynamic)
 
-    # Setup MQTT Commander and Battery Shutdown / Reboot commands
+    # Commander subscribes to MQTT set-topics and wires up shutdown/restart.
     Commander(configuration.static, configuration.dynamic, monitor)
 
-    # Create Home Assistant data if enabled
     if bool(configuration.static["homeassistant"]["discovery"]):
         Homeassistant(configuration.static, configuration.dynamic)
 
-    # Connect to MQTT server and loop forever
+    # Blocks here — loop_forever() drives the entire application until the
+    # battery shuts the device down or the process is signalled.
     mqtt.connect(
         configuration.static["mqtt"]["broker"],
         int(configuration.static["mqtt"]["port"]),

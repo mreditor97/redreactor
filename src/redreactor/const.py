@@ -4,8 +4,12 @@ DEFAULT_REPORT_INTERVAL = 30  # Seconds between data reporting
 DEFAULT_EXPIRE_INTERVAL = 120  # Seconds before Home Assistant invalidates received data
 DEFAULT_BATTERY_WARNING_THRESHOLD = 10  # Percentage of charge remaining
 DEFAULT_BATTERY_VOLTAGE_MINIMUM = 2.9  # Minimum battery voltage before shutting down
-DEFAULT_BATTERY_VOLTAGE_MAXIMUM = 4.2  # Maximum battery voltage
-DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP = 0.03  # Maximum battery voltage allowable drop
+DEFAULT_BATTERY_VOLTAGE_MAXIMUM = 4.2  # Maximum battery voltage (fully charged)
+# Subtracting this drop from the maximum avoids reporting 100% under load, where
+# voltage sags slightly even when the battery is full.
+DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP = 0.03
+# Voltage above the nominal maximum indicates external power is connected.
+# The 0.05 V headroom avoids false positives from measurement noise.
 DEFAULT_BATTERY_VOLTAGE_ERROR = DEFAULT_BATTERY_VOLTAGE_MAXIMUM + 0.05
 
 DEFAULT_INA_I2C_ADDRESS = 0x40  # Red Reactor Default I2C Address

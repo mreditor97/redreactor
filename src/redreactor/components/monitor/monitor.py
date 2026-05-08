@@ -154,20 +154,22 @@ class Monitor:
                     self.data.battery_voltage_maximum,
                 )
             else:
-                # Identify status change
+                # INA219 current sign convention on the Red Reactor:
+                #   > 10 mA  -- discharging (no external power)
+                #   0-10 mA  -- float charge (battery full, power present)
+                #   negative -- actively charging (power just reconnected)
                 if self.data.current > 10:
-                    # No External Power
                     if self.data.external_power:
-                        # Power removed
+                        # Transition: power just removed
                         self.data.external_power = False
                         self._update()
                 elif self.data.current >= 0:
                     if not self.data.external_power:
-                        # Power restored (battery full / float charge)
+                        # Transition: power restored, battery now floating
                         self.data.external_power = True
                         self._update()
                 elif not self.data.external_power:
-                    # Power restored
+                    # Transition: power restored, battery actively charging
                     self.data.external_power = True
                     self._update()
 
@@ -175,12 +177,15 @@ class Monitor:
             self.data.battery_level <= float(self.data.battery_warning_threshold)
             and not self.data.external_power
         ):
-            # Force immediate publish update at warning level
+            # Publish immediately so Home Assistant reflects the warning without
+            # waiting for the next scheduled report_interval tick.
             self._update()
 
         if self.data.battery_level == 0.0 and not self.data.external_power:
             shutdown = True
 
+        # Voltage above the nominal maximum indicates external power is present
+        # (e.g. charger connected but INA219 current read was noisy/stale).
         if self.data.voltage > self.data.battery_voltage_maximum + 0.05:
             self.data.external_power = True
             # Force immediate publish update at warning level
@@ -197,7 +202,13 @@ class Monitor:
             self.event.emit("shutdown")
 
     def _calculate_battery_level(self, voltage: float) -> int:
-        """Calculate Battery Level."""
+        """Calculate Battery Level.
+
+        Subtracting DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP from the ceiling
+        prevents the level from reaching 100% while the battery is still under
+        load (voltage sags slightly even when fully charged).  min/max clamp
+        the result to [0, 100] so transient out-of-range readings are safe.
+        """
         return int(
             max(
                 min(

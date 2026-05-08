@@ -41,6 +41,8 @@ class DynamicConfiguration:
 
         self.data = self._load()
 
+        # Self-register so any component can persist a config change simply by
+        # emitting "write" on this event, without needing a direct reference.
         self.event.on(event_name="write", function=self.write)
 
     def _load(self) -> Any:
@@ -60,6 +62,8 @@ class DynamicConfiguration:
         with dynamic_path.open() as file:
             dynamic_file_override = json.load(file)
 
+        # Simple dict unpack is fine here — the dynamic config is flat (no
+        # nested dicts), so override values win without recursive merging.
         return {**dynamic_file_defaults, **dynamic_file_override}
 
     def write(self) -> None:
