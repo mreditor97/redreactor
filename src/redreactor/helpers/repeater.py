@@ -31,6 +31,10 @@ class RepeatTimer:
 
     def _run(self) -> None:
         """Run timer."""
+        # Schedule the next tick BEFORE invoking the callback so the interval
+        # is measured from the start of each call, not the end.  It also means
+        # a stop() issued from inside the callback will cancel the already-
+        # queued next timer rather than being silently ignored.
         self.is_running = False
         self.start()
         self.function(*self.args, **self.kwargs)
@@ -39,6 +43,8 @@ class RepeatTimer:
         """Start the thread timer."""
         if not self.is_running:
             self._timer = Timer(self.interval, self._run)
+            # Daemon threads are silently killed when the main thread exits,
+            # so timers don't prevent a clean process shutdown.
             self._timer.daemon = True
             self._timer.start()
             self.is_running = True

@@ -145,10 +145,12 @@ class Homeassistant:
                     ),
                 )
 
-            # Merge the configurations
+            # Overlay the shared Base fields onto the type-specific object.
+            # `configuring` (Base) wins on any key present in both, which is
+            # intentional — Base carries the authoritative common attributes
+            # such as unique_id, state_topic, and availability.
             configured.__dict__ |= configuring.__dict__
 
-            # Append the configuration to the configuration variable
             self.configuration.append(configured)
 
     def _update_homeassistant_configuration(self) -> None:
@@ -157,8 +159,9 @@ class Homeassistant:
             "Publishing Homeassistant MQTT configuration / discovery information",
         )
 
-        # Publish Home Assistant configuration for each field
         for field in self.configuration:
+            # None values are stripped before serialisation — Home Assistant
+            # rejects discovery payloads that contain null fields.
             MQTT.event.emit(
                 event_name="publish",
                 topic=field.configuration_topic,

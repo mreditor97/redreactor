@@ -19,6 +19,9 @@ class MQTT:
 
     logger = logging.getLogger("Red Reactor")
 
+    # Class-level EventEmitter is intentional: it acts as a singleton event bus
+    # so Monitor, Commander, and Homeassistant can all subscribe to the same
+    # MQTT events without holding a direct reference to the MQTT instance.
     event: EventEmitter = EventEmitter()
 
     # MQTT Client
@@ -127,7 +130,8 @@ class MQTT:
         if rc == 0:
             self.logger.info("Connected to MQTT Broker")
 
-            # Configure a last will message if something happens to the connection
+            # Last Will must be registered after each (re)connect; paho resets
+            # it on disconnect so setting it once in __init__ is not sufficient.
             client.will_set(
                 topic=f"{self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['status']}",
                 payload=f"{self._static_configuration['status']['offline']}",

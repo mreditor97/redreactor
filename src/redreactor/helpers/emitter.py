@@ -19,6 +19,7 @@ class EventEmitter:
     def on(self, event_name: str, function: Any) -> Any:
         """Register event to a specific item."""
         self.__callbacks[event_name] = [*self.__callbacks.get(event_name, []), function]
+        # Returning the function allows this method to be used as a decorator.
         return function
 
     def emit(

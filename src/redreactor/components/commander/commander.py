@@ -169,10 +169,12 @@ class Commander:
             payload=f"{self._static_configuration['status']['offline']}",
         )
 
-        # Ensure the MQTT data has been published to the broker
+        # Give the broker time to deliver the offline status before the TCP
+        # connection drops when the process exits.
         time.sleep(2)
 
-        # Command comes from trusted user-controlled YAML config, not external input
+        # The shutdown/restart command comes from the trusted YAML config, not
+        # from the MQTT payload, so splitting with shlex (shell=False) is safe.
         cmd = shlex.split(self._static_configuration["system"][event_type])
         subprocess.run(cmd, check=False)  # noqa: S603
 
