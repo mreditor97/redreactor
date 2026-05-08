@@ -11,3 +11,4 @@ Choose the guide that matches your environment:
 * [Home Assistant OS](Home-Assistant-OS) — Install via the dedicated Red Reactor add-on
 * [Ubuntu / Standard Linux OS](Linux) — Run as a systemd service with a dedicated user
 * [Docker](Docker) — Run as a container with I2C device passthrough
+* [PyPI](PyPI) — Install directly with `pip` for a quick manual setup
