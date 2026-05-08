@@ -15,22 +15,7 @@ This guide covers installing Red Reactor as a persistent background service on U
 
 ## Step 1 — Enable I2C
 
-The Red Reactor uses I2C to communicate with the INA219 power monitor. Enable I2C on your Pi:
-
-```bash
-sudo raspi-config
-```
-
-Navigate to **Interface Options > I2C > Enable**, then reboot.
-
-Verify the INA219 is detected (default address `0x40`):
-
-```bash
-sudo apt install -y i2c-tools
-i2cdetect -y 1
-```
-
-You should see `40` in the output grid.
+Follow the [Enabling I2C](Enabling-I2C) guide (Standard Linux section), then return here.
 
 ---
 
@@ -48,16 +33,8 @@ python3 --version   # must be 3.10 or later
 Running as a dedicated user limits the service's permissions:
 
 ```bash
-# Create user without a login shell
 sudo useradd --system --no-create-home --shell /usr/sbin/nologin redreactor
-
-# Working directory (holds the virtualenv and dynamic database)
-sudo mkdir -p /var/lib/redreactor
-
-# Configuration directory
-sudo mkdir -p /etc/redreactor
-
-# Set ownership
+sudo mkdir -p /var/lib/redreactor /etc/redreactor
 sudo chown redreactor:redreactor /var/lib/redreactor /etc/redreactor
 ```
 
@@ -66,18 +43,13 @@ sudo chown redreactor:redreactor /var/lib/redreactor /etc/redreactor
 ## Step 4 — Install Red Reactor into a Virtualenv
 
 ```bash
-# Create the virtualenv
 sudo -u redreactor python3 -m venv /var/lib/redreactor/.venv
-
-# Install Red Reactor from PyPI
 sudo -u redreactor /var/lib/redreactor/.venv/bin/pip install redreactor
 ```
 
 ---
 
 ## Step 5 — Configure Red Reactor
-
-Copy the example configuration and edit it for your environment:
 
 ```bash
 sudo curl -fsSL https://raw.githubusercontent.com/mreditor97/redreactor/master/extras/config.yaml \
@@ -86,45 +58,31 @@ sudo chown redreactor:redreactor /etc/redreactor/config.yaml
 sudo nano /etc/redreactor/config.yaml
 ```
 
-At minimum, update the MQTT section to point at your broker:
+See the [Configuration](Configuration) guide for a full reference of every option. At minimum, set your MQTT broker details and hostname:
 
 ```yaml
 mqtt:
-  broker: 192.168.1.100   # Your MQTT broker IP or hostname
+  broker: 192.168.1.100
   port: 1883
   user: your_mqtt_username
   password: your_mqtt_password
 
 hostname:
-  name: redreactor-pi     # Slug used in MQTT topics
-  pretty: Red Reactor Pi  # Friendly display name
+  name: redreactor-pi     # Used in MQTT topics — must be unique per device
+  pretty: Red Reactor Pi
 ```
-
-Full configuration reference:
-
-| Key | Default | Description |
-|---|---|---|
-| `mqtt.broker` | `127.0.0.1` | MQTT broker address |
-| `mqtt.port` | `1883` | MQTT broker port |
-| `mqtt.version` | `3` | MQTT protocol version (`3` or `5`) |
-| `mqtt.base_topic` | `redreactor` | Root topic prefix |
-| `hostname.name` | `redreactor` | Used in MQTT topic paths |
-| `homeassistant.discovery` | `true` | Enable HA MQTT auto-discovery |
-| `homeassistant.expire_after` | `120` | Seconds before HA marks sensor unavailable |
-| `logging.console` | `INFO` | Console log level |
-| `logging.file` | `WARNING` | File log level |
 
 ---
 
 ## Step 6 — Allow Shutdown and Restart Commands
 
-The service needs permission to call `sudo shutdown` when instructed via MQTT. Add a targeted sudoers rule:
+The service needs permission to call `sudo shutdown` when instructed via MQTT:
 
 ```bash
 sudo visudo -f /etc/sudoers.d/redreactor
 ```
 
-Add the following line:
+Add:
 
 ```
 redreactor ALL=(ALL) NOPASSWD: /sbin/shutdown
@@ -147,8 +105,6 @@ sudo systemctl start redreactor
 
 ## Step 8 — Verify the Service
 
-Check that the service started successfully:
-
 ```bash
 sudo systemctl status redreactor
 ```
@@ -165,19 +121,13 @@ View live logs:
 
 ```bash
 sudo journalctl -u redreactor -f
-```
-
-Or check the log file directly:
-
-```bash
+# or
 tail -f /etc/redreactor/redreactor.log
 ```
 
 ---
 
 ## Updating
-
-To update to a new release:
 
 ```bash
 sudo -u redreactor /var/lib/redreactor/.venv/bin/pip install --upgrade redreactor
@@ -191,14 +141,14 @@ sudo systemctl restart redreactor
 **"Unable to connect to the Red Reactor" on startup**
 - Run `i2cdetect -y 1` and confirm address `0x40` is listed
 - Ensure the Red Reactor board is firmly seated on the GPIO header
-- Verify I2C is enabled via `raspi-config`
+- Verify I2C is enabled — see [Enabling I2C](Enabling-I2C)
 
 **Service fails to connect to MQTT**
-- Test the broker manually: `mosquitto_sub -h <broker_ip> -u <user> -P <pass> -t "#" -v`
-- Check the broker address, port, and credentials in `config.yaml`
-- If `exit_on_fail: true`, the service exits on connection failure — check `journalctl -u redreactor` for the error
+- Test the broker: `mosquitto_sub -h <broker_ip> -u <user> -P <pass> -t "#" -v`
+- Check credentials in `/etc/redreactor/config.yaml`
+- If `exit_on_fail: true`, the service exits on failure — check `journalctl -u redreactor`
 
 **Permission denied on shutdown**
-- Verify the sudoers rule: `sudo -u redreactor sudo shutdown --help` should not prompt for a password
+- Verify: `sudo -u redreactor sudo shutdown --help` should not prompt for a password
 
 If you have problems, create an [issue](https://github.com/mreditor97/redreactor/issues) on the GitHub repository.

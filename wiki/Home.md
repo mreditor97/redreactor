@@ -12,3 +12,8 @@ Choose the guide that matches your environment:
 * [Ubuntu / Standard Linux OS](Linux) — Run as a systemd service with a dedicated user
 * [Docker](Docker) — Run as a container with I2C device passthrough
 * [PyPI](PyPI) — Install directly with `pip` for a quick manual setup
+
+## Reference
+
+* [Enabling I2C](Enabling-I2C) — Enable I2C on Raspberry Pi OS, Ubuntu, HAOS, or a Docker host
+* [Configuration](Configuration) — Full reference for all `config.yaml` options, MQTT topics, and commands

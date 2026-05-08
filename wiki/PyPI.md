@@ -2,14 +2,14 @@
 
 Red Reactor is published on [PyPI](https://pypi.org/project/redreactor/) and can be installed directly with `pip`. This is the quickest approach if you already have a Python environment on your Raspberry Pi and want to run the service manually or integrate it into an existing setup.
 
-For a fully managed installation (auto-start on boot, dedicated user), see the [Ubuntu / Standard Linux OS](Linux) guide instead — it uses PyPI under the hood.
+For a fully managed installation (auto-start on boot, dedicated user), see the [Ubuntu / Standard Linux OS](Linux) guide instead.
 
 ---
 
 ## Prerequisites
 
 - A Raspberry Pi with a **Red Reactor** board attached
-- I2C enabled — follow **Step 1** of the [Ubuntu / Standard Linux OS](Linux) guide
+- I2C enabled — see [Enabling I2C](Enabling-I2C)
 - Python 3.10 or later
 - An accessible MQTT broker
 
@@ -33,15 +33,13 @@ python -m redreactor --help
 
 ## Configure
 
-Download the example config and edit it:
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mreditor97/redreactor/master/extras/config.yaml \
   -o config.yaml
 nano config.yaml
 ```
 
-See the [configuration reference](Linux#step-5--configure-red-reactor) in the Linux guide for all available keys. At minimum:
+See the [Configuration](Configuration) guide for a full reference of every option. At minimum:
 
 ```yaml
 mqtt:
@@ -51,7 +49,7 @@ mqtt:
   password: your_mqtt_password
 
 hostname:
-  name: redreactor-pi
+  name: redreactor-pi     # Used in MQTT topics — must be unique per device
   pretty: Red Reactor Pi
 ```
 

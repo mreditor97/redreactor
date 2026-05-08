@@ -9,19 +9,20 @@ This guide covers running Red Reactor as a Docker container. The container acces
 - A Raspberry Pi with a **Red Reactor** board attached
 - Docker and Docker Compose installed on the host
 - An accessible MQTT broker
-- I2C enabled on the host OS — follow **Step 1** of the [Ubuntu / Standard Linux OS](Linux) guide, then return here
+- I2C enabled on the host OS — see [Enabling I2C](Enabling-I2C)
 
 ---
 
 ## Step 1 — Create the Configuration File
 
-Create a working directory and config file:
-
 ```bash
 mkdir -p ~/redreactor
+curl -fsSL https://raw.githubusercontent.com/mreditor97/redreactor/master/extras/config.yaml \
+  -o ~/redreactor/config.yaml
+nano ~/redreactor/config.yaml
 ```
 
-Create `~/redreactor/config.yaml` — see the [configuration reference](Linux#step-5--configure-red-reactor) in the Linux guide for all available options. At minimum:
+See the [Configuration](Configuration) guide for a full reference of every option. At minimum:
 
 ```yaml
 mqtt:
@@ -31,7 +32,7 @@ mqtt:
   password: your_mqtt_password
 
 hostname:
-  name: redreactor-pi
+  name: redreactor-pi     # Used in MQTT topics — must be unique per device
   pretty: Red Reactor Pi
 ```
 
@@ -70,9 +71,7 @@ services:
       - /dev/i2c-1:/dev/i2c-1
 
     volumes:
-      # Mount config file (read-only)
       - ./config.yaml:/config/config.yaml:ro
-      # Persist the dynamic settings database and log file
       - redreactor-data:/data
 
     # Required for shutdown/restart commands to affect the host
@@ -132,13 +131,13 @@ docker compose up -d --build --pull always
 ## Troubleshooting
 
 **"Unable to connect to the Red Reactor" on startup**
-- Confirm `/dev/i2c-1` exists: `ls /dev/i2c-*`
+- Confirm `/dev/i2c-1` exists on the host: `ls /dev/i2c-*`
 - Confirm the `devices` mapping in `docker-compose.yaml` includes `/dev/i2c-1`
-- Confirm I2C is enabled on the host: `i2cdetect -y 1` should show `40`
+- See [Enabling I2C](Enabling-I2C) if I2C is not yet enabled
 
 **Container exits immediately**
 - Check logs: `docker compose logs redreactor`
-- If `exit_on_fail: true`, an MQTT connection failure exits the container — verify broker address and credentials
+- If `exit_on_fail: true`, an MQTT connection failure exits the container — verify broker address and credentials in `config.yaml`
 - The `restart: unless-stopped` policy will restart it automatically
 
 **Shutdown/restart commands have no effect**
