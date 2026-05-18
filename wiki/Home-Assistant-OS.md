@@ -50,18 +50,28 @@ There is a comprehensive guide available on the [Home Assistant website](https:/
 
 ---
 
-## Step 2 — Enable Console on tty1
+## Step 2 — Configure Boot Parameters
 
-The Red Reactor add-on requires a TTY console to issue shutdown and restart commands to the host. This must be set in `cmdline.txt` on the SD card.
+The Red Reactor add-on requires specific boot settings for the serial console, I2C bus, and GPIO-controlled power-off. These are set by editing two files on the SD card.
 
 1. Shut down the Pi and remove the SD card
 2. Plug the SD card into a PC and open the `hassos-boot` partition
-3. Open `cmdline.txt` and verify `console=tty1` is present on the existing line
-4. If it is missing, add it — the file must remain a **single line**, e.g.:
-   ```
-   console=tty1 ... quiet systemd.unified_cgroup_hierarchy=false
-   ```
-5. Save the file, eject the card, reinsert, and boot the Pi
+
+**cmdline.txt** — verify `console=tty1` is present on the existing single line; add it if missing:
+```
+console=tty1 ... quiet systemd.unified_cgroup_hierarchy=false
+```
+
+**config.txt** — add the following lines:
+```
+enable_uart=1
+dtparam=i2c_arm=on
+dtoverlay=gpio-poweroff,gpiopin=14,active_low=1,timeout_ms=8000
+```
+
+`enable_uart=1` activates the hardware UART. `dtparam=i2c_arm=on` enables the I2C bus. `dtoverlay=gpio-poweroff` ensures the Pi drives GPIO 14 low after shutdown so the Red Reactor can cut power cleanly.
+
+3. Save both files, eject the card, reinsert, and boot the Pi
 
 ---
 

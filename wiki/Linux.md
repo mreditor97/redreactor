@@ -13,15 +13,19 @@ This guide covers installing Red Reactor as a persistent background service on U
 
 ---
 
-## Step 1 — Enable Console on tty1
+## Step 1 — Configure Boot Parameters
 
-The Red Reactor service requires a TTY console to issue shutdown and restart commands. Verify that `console=tty1` is present in `/boot/firmware/cmdline.txt` (the path may be `/boot/cmdline.txt` on older images):
+Two boot files need updating before the service will work correctly.
+
+### cmdline.txt — enable TTY console
+
+The service requires a TTY console to issue shutdown and restart commands. Verify that `console=tty1` is present in `/boot/firmware/cmdline.txt` (path may be `/boot/cmdline.txt` on older images):
 
 ```bash
 cat /boot/firmware/cmdline.txt
 ```
 
-If `console=tty1` is not present, add it. The file must remain a single line:
+If missing, add it — the file must remain a **single line**:
 
 ```bash
 sudo nano /boot/firmware/cmdline.txt
@@ -29,7 +33,23 @@ sudo nano /boot/firmware/cmdline.txt
 # console=serial0,115200 console=tty1 root=PARTUUID=... rootfstype=ext4 ...
 ```
 
-Reboot after saving the change.
+### config.txt — enable I2C and GPIO power-off
+
+Add the following to `/boot/firmware/config.txt` (path may be `/boot/config.txt` on older images):
+
+```bash
+sudo nano /boot/firmware/config.txt
+```
+
+```
+enable_uart=1
+dtparam=i2c_arm=on
+dtoverlay=gpio-poweroff,gpiopin=14,active_low=1,timeout_ms=8000
+```
+
+`enable_uart=1` activates the hardware UART (required for the serial console). `dtparam=i2c_arm=on` enables the I2C bus. `dtoverlay=gpio-poweroff` ensures the Pi drives GPIO 14 low after shutdown, allowing the Red Reactor to cut power cleanly.
+
+Reboot after saving both files.
 
 ---
 

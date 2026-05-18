@@ -14,7 +14,21 @@ sudo raspi-config
 
 Navigate to **Interface Options > I2C > Enable**, then reboot.
 
-Verify the INA219 is detected at address `0x40`:
+Then add the GPIO power-off overlay to `/boot/firmware/config.txt` (path may be `/boot/config.txt` on older images):
+
+```bash
+sudo nano /boot/firmware/config.txt
+```
+
+Add the following lines:
+
+```
+enable_uart=1
+dtparam=i2c_arm=on
+dtoverlay=gpio-poweroff,gpiopin=14,active_low=1,timeout_ms=8000
+```
+
+Reboot after saving, then verify the INA219 is detected at address `0x40`:
 
 ```bash
 sudo apt install -y i2c-tools
@@ -39,8 +53,10 @@ HAOS does not include `raspi-config`. Two methods are available:
    ```
 4. Edit `config.txt` in the root of the `hassos-boot` partition and add:
    ```
+   enable_uart=1
    dtparam=i2c_vc=on
    dtparam=i2c_arm=on
+   dtoverlay=gpio-poweroff,gpiopin=14,active_low=1,timeout_ms=8000
    ```
 5. Eject, reinsert, and boot the Pi — then reboot once more to fully activate I2C
 
