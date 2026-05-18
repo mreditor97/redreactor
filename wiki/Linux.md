@@ -13,13 +13,33 @@ This guide covers installing Red Reactor as a persistent background service on U
 
 ---
 
-## Step 1 — Enable I2C
+## Step 1 — Enable Console on tty1
+
+The Red Reactor service requires a TTY console to issue shutdown and restart commands. Verify that `console=tty1` is present in `/boot/firmware/cmdline.txt` (the path may be `/boot/cmdline.txt` on older images):
+
+```bash
+cat /boot/firmware/cmdline.txt
+```
+
+If `console=tty1` is not present, add it. The file must remain a single line:
+
+```bash
+sudo nano /boot/firmware/cmdline.txt
+# Add console=tty1 to the existing line, e.g.:
+# console=serial0,115200 console=tty1 root=PARTUUID=... rootfstype=ext4 ...
+```
+
+Reboot after saving the change.
+
+---
+
+## Step 2 — Enable I2C
 
 Follow the [Enabling I2C](Enabling-I2C) guide (Standard Linux section), then return here.
 
 ---
 
-## Step 2 — Install Python 3.10+
+## Step 3 — Install Python 3.10+
 
 ```bash
 sudo apt update && sudo apt install -y python3 python3-pip python3-venv
@@ -28,7 +48,7 @@ python3 --version   # must be 3.10 or later
 
 ---
 
-## Step 3 — Create a Dedicated User and Directories
+## Step 4 — Create a Dedicated User and Directories
 
 Running as a dedicated user limits the service's permissions:
 
@@ -40,7 +60,7 @@ sudo chown redreactor:redreactor /var/lib/redreactor /etc/redreactor
 
 ---
 
-## Step 4 — Install Red Reactor into a Virtualenv
+## Step 5 — Install Red Reactor into a Virtualenv
 
 ```bash
 sudo -u redreactor python3 -m venv /var/lib/redreactor/.venv
@@ -49,7 +69,7 @@ sudo -u redreactor /var/lib/redreactor/.venv/bin/pip install redreactor
 
 ---
 
-## Step 5 — Configure Red Reactor
+## Step 6 — Configure Red Reactor
 
 ```bash
 sudo curl -fsSL https://raw.githubusercontent.com/mreditor97/redreactor/master/extras/config.yaml \
@@ -74,7 +94,7 @@ hostname:
 
 ---
 
-## Step 6 — Allow Shutdown and Restart Commands
+## Step 7 — Allow Shutdown and Restart Commands
 
 The service needs permission to call `sudo shutdown` when instructed via MQTT:
 
@@ -90,7 +110,7 @@ redreactor ALL=(ALL) NOPASSWD: /sbin/shutdown
 
 ---
 
-## Step 7 — Install the systemd Service
+## Step 8 — Install the systemd Service
 
 ```bash
 sudo curl -fsSL https://raw.githubusercontent.com/mreditor97/redreactor/master/extras/redreactor.service \
@@ -103,7 +123,7 @@ sudo systemctl start redreactor
 
 ---
 
-## Step 8 — Verify the Service
+## Step 9 — Verify the Service
 
 ```bash
 sudo systemctl status redreactor

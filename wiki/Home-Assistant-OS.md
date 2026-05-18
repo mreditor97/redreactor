@@ -50,7 +50,22 @@ There is a comprehensive guide available on the [Home Assistant website](https:/
 
 ---
 
-## Step 2 — Add the Red Reactor Add-on Repository
+## Step 2 — Enable Console on tty1
+
+The Red Reactor add-on requires a TTY console to issue shutdown and restart commands to the host. This must be set in `cmdline.txt` on the SD card.
+
+1. Shut down the Pi and remove the SD card
+2. Plug the SD card into a PC and open the `hassos-boot` partition
+3. Open `cmdline.txt` and verify `console=tty1` is present on the existing line
+4. If it is missing, add it — the file must remain a **single line**, e.g.:
+   ```
+   console=tty1 ... quiet systemd.unified_cgroup_hierarchy=false
+   ```
+5. Save the file, eject the card, reinsert, and boot the Pi
+
+---
+
+## Step 3 — Add the Red Reactor Add-on Repository
 
 1. Go to **Settings > Add-ons > Add-on Store > ⋮ > Repositories** and add:
    ```
@@ -61,14 +76,14 @@ There is a comprehensive guide available on the [Home Assistant website](https:/
 
 ---
 
-## Step 3 — Install the Add-on
+## Step 4 — Install the Add-on
 
 1. Find **Red Reactor Battery Monitor** in the add-on store and click it
 2. Click **Install** and wait for the installation to complete
 
 ---
 
-## Step 4 — Configure the Add-on
+## Step 5 — Configure the Add-on
 
 Open the **Configuration** tab and set your MQTT broker and hostname:
 
@@ -98,7 +113,7 @@ Key configuration options:
 
 ---
 
-## Step 5 — Start the Add-on
+## Step 6 — Start the Add-on
 
 1. Click **Start** on the add-on **Info** tab
 2. Enable **Start on boot** and **Watchdog** so the service restarts automatically
@@ -111,7 +126,7 @@ Key configuration options:
 
 ---
 
-## Step 6 — Verify in Home Assistant
+## Step 7 — Verify in Home Assistant
 
 With MQTT auto-discovery enabled, Home Assistant will automatically create a **Red Reactor** device:
 
