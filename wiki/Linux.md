@@ -43,6 +43,7 @@ sudo nano /boot/firmware/config.txt
 
 ```
 enable_uart=1
+dtparam=i2c_vc=on
 dtparam=i2c_arm=on
 dtoverlay=gpio-poweroff,gpiopin=14,active_low=1,timeout_ms=8000
 ```
