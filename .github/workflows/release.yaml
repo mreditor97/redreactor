@@ -30,7 +30,7 @@ jobs:
       version: ${{ steps.release.outputs.version }}
     steps:
       - name: ⤵️ Check out code from GitHub
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: ℹ️ Gather version and environment
         id: release
         run: |
@@ -57,7 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: ⤵️ Check out code from GitHub
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: 🏗 Set up Poetry
         run: pipx install poetry
       - name: 🏗 Set up Python 3.10
