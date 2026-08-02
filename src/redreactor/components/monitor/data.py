@@ -25,7 +25,7 @@ class MonitorData:
     battery_voltage_maximum: float
     report_interval: int
 
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913, PLR0917
         self,
         voltage: float = 0.0,
         current: float = 0.0,
