@@ -78,7 +78,7 @@ class Device(Representer):
     sw_version: str | None
     via_device: str | None
 
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913, PLR0917
         self,
         configuration_url: str | None = None,
         connections: list[list[str]] | None = None,
@@ -130,7 +130,7 @@ class Base(Representer):
         str | None
     )  # Used for one time creation of the Home Assistant configuration topic
 
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913, PLR0917
         self,
         name: str | None = None,
         device_class: str | None = None,

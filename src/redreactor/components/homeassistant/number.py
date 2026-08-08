@@ -18,7 +18,7 @@ class Number(Base):
     optimistic: bool | None
     unit_of_measurement: str | None
 
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913, PLR0917
         self,
         state_topic: str | None = None,
         command_topic: str | None = None,
