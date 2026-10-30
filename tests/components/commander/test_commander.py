@@ -361,3 +361,24 @@ def test_on_command_logs_missing_system_command(commander):
 
     mock_exception.assert_called_once()
     assert disconnect_calls == [True]
+
+
+def test_on_message_matches_renamed_field_name(commander, static_config):
+    """Commands are matched on the configured field name, stored by field key."""
+    cmd, _ = commander
+    static_config["fields"]["report_interval"]["name"] = "interval_seconds"
+
+    _send_number(cmd, static_config, "interval_seconds", "60")
+
+    assert cmd._dynamic_configuration.data["report_interval"] == 60
+
+
+def test_on_message_requires_exact_field_name(commander, static_config):
+    """A topic that only contains a field name is not treated as that field."""
+    cmd, _ = commander
+
+    with patch.object(cmd.logger, "warning") as mock_warn:
+        _send_number(cmd, static_config, "report_interval_extra", "60")
+
+    assert cmd._dynamic_configuration.data["report_interval"] == 30
+    mock_warn.assert_called_once()

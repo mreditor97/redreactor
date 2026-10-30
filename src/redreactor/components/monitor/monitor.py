@@ -12,6 +12,7 @@ from ina219 import INA219, DeviceRangeError
 from redreactor.components.monitor.data import MonitorData
 from redreactor.components.mqtt import MQTT
 from redreactor.const import (
+    DEFAULT_BATTERY_VOLTAGE_HEADROOM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
     DEFAULT_BATTERY_VOLTAGE_MINIMUM,
@@ -141,18 +142,17 @@ class Monitor:
                 )
                 self.data.current = ina.current()
             except DeviceRangeError:
+                # The current is above what the INA219 can measure. The device
+                # is still running, so stay online and publish straight away,
+                # reporting the current as the configured maximum.
                 # Assume no external power so the device will still shutdown on a low voltage reading # noqa: E501
                 self.logger.exception("Battery current range error")
                 self.data.external_power = False
-                self.data.current = 6000
-
-                MQTT.event.emit(
-                    event_name="publish",
-                    topic=f"{self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['status']}",
-                    payload=f"{self._static_configuration['status']['offline']}",
-                    qos=1,
-                    retain=True,
+                self.data.current = (
+                    float(self._static_configuration["ina"]["max_expected_amps"])
+                    * 1000
                 )
+                self._update()
             except ZeroDivisionError:
                 self.logger.exception(
                     "Minimum Voltage %fV and Maximum Voltage %fV difference is equal to 0",  # noqa: E501
@@ -179,6 +179,18 @@ class Monitor:
                     self.data.external_power = True
                     self._update()
 
+        # Voltage above the nominal maximum indicates external power is present
+        # (e.g. charger connected but INA219 current read was noisy/stale).
+        # Checked before the warning and shutdown decisions so they use it.
+        if (
+            self.data.voltage
+            > self.data.battery_voltage_maximum + DEFAULT_BATTERY_VOLTAGE_HEADROOM
+            and not self.data.external_power
+        ):
+            # Transition: power detected from voltage, publish it straight away
+            self.data.external_power = True
+            self._update()
+
         if (
             self.data.battery_level <= float(self.data.battery_warning_threshold)
             and not self.data.external_power
@@ -199,13 +211,6 @@ class Monitor:
                 )
         else:
             self._empty_readings = 0
-
-        # Voltage above the nominal maximum indicates external power is present
-        # (e.g. charger connected but INA219 current read was noisy/stale).
-        if self.data.voltage > self.data.battery_voltage_maximum + 0.05:
-            self.data.external_power = True
-            # Force immediate publish update at warning level
-            self._update()
 
         # Shutdown system
         if shutdown:
@@ -341,35 +346,27 @@ class Monitor:
         """Update Dynamic Configuration.
 
         This uses a event hook back to the Dynamic Configuration to update the file.
+        The dynamic configuration is keyed by field key, not by the configurable
+        field name used for MQTT topics and payloads.
         """
         # Update Battery Warning Threshold
         self.data.battery_warning_threshold = int(
-            self._dynamic_configuration.data[
-                self._static_configuration["fields"]["battery_warning_threshold"][
-                    "name"
-                ]
-            ],
+            self._dynamic_configuration.data["battery_warning_threshold"],
         )
 
         # Update Battery Voltage Minimum
         self.data.battery_voltage_minimum = float(
-            self._dynamic_configuration.data[
-                self._static_configuration["fields"]["battery_voltage_minimum"]["name"]
-            ],
+            self._dynamic_configuration.data["battery_voltage_minimum"],
         )
 
         # Update Battery Voltage Maximum
         self.data.battery_voltage_maximum = float(
-            self._dynamic_configuration.data[
-                self._static_configuration["fields"]["battery_voltage_maximum"]["name"]
-            ],
+            self._dynamic_configuration.data["battery_voltage_maximum"],
         )
 
         # Update Report Interval
         self.data.report_interval = int(
-            self._dynamic_configuration.data[
-                self._static_configuration["fields"]["report_interval"]["name"]
-            ],
+            self._dynamic_configuration.data["report_interval"],
         )
 
         if self.report_timer:

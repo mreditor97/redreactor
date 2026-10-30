@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from importlib.metadata import version
 from typing import TYPE_CHECKING, Any
 
 from redreactor.components.mqtt import MQTT
@@ -26,7 +27,7 @@ class Homeassistant:
 
     logger = logging.getLogger("Red Reactor")
 
-    configuration: list[Sensor | Number | BinarySensor | Button] = []
+    configuration: list[Sensor | Number | BinarySensor | Button]
 
     _static_configuration: dict[str, Any] = {}
     _dynamic_configuration: DynamicConfiguration
@@ -41,6 +42,7 @@ class Homeassistant:
         """Initialise Home Assistant integration object."""
         self._static_configuration = static_configuration
         self._dynamic_configuration = dynamic_configuration
+        self.configuration = []
 
         self._process_homeassistant_configuration(static_configuration)
 
@@ -64,7 +66,7 @@ class Homeassistant:
             manufacturer="Pascal Herczog",
             model="Red Reactor",
             hw_version="Rev 1.5",
-            sw_version="1.0.0",
+            sw_version=version("redreactor"),
         )
 
         for field_key in static_configuration["fields"]:
