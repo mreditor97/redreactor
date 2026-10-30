@@ -5,9 +5,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
-from redreactor.configuration import DynamicConfiguration, LinkedConfiguration
+from redreactor.configuration import (
+    ConfigurationError,
+    DynamicConfiguration,
+    LinkedConfiguration,
+)
 from redreactor.const import (
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MINIMUM,
@@ -179,3 +184,107 @@ def test_linked_config_keeps_configured_client_id(tmp_path):
     config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
 
     assert config.static["mqtt"]["client_id"] == "my-client"
+
+
+@pytest.mark.parametrize("contents", ["not json {", "[1, 2]", '"text"'])
+def test_dynamic_config_unreadable_file_uses_defaults(tmp_path, contents):
+    """A corrupt or non-object dynamic file falls back to the defaults."""
+    dynamic_file = tmp_path / "dynamic.json"
+    dynamic_file.write_text(contents)
+
+    config = DynamicConfiguration(dynamic_file=str(dynamic_file))
+
+    assert config.data["report_interval"] == DEFAULT_REPORT_INTERVAL
+
+
+@pytest.mark.parametrize("interval", [0, -5])
+def test_dynamic_config_rejects_non_positive_report_interval(tmp_path, interval):
+    """A report interval of 0 or less would spin the report timer."""
+    dynamic_file = tmp_path / "dynamic.json"
+    dynamic_file.write_text(json.dumps({"report_interval": interval}))
+
+    config = DynamicConfiguration(dynamic_file=str(dynamic_file))
+
+    assert config.data["report_interval"] == DEFAULT_REPORT_INTERVAL
+
+
+def test_linked_config_empty_static_file_uses_defaults(tmp_path):
+    """An empty static file loads as None, which is treated as no overrides."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text("")
+
+    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+
+    assert config.static["mqtt"]["port"] == 1883
+
+
+def test_linked_config_accepts_example_config(tmp_path):
+    """The example configuration shipped in extras/ passes validation."""
+    example = Path(__file__).parent.parent / "extras" / "config.yaml"
+
+    LinkedConfiguration(str(example), str(tmp_path / "dynamic.json"))
+
+
+@pytest.mark.parametrize(
+    ("override", "path"),
+    [
+        ("- just\n- a list\n", "mapping of options"),
+        ("mqtt:\n", "`mqtt` must be a mapping"),
+        ("mqtt: {topic: state}\n", "`mqtt.topic` must be a mapping"),
+        ("mqtt: {port: 'abc'}\n", "`mqtt.port`"),
+        ("mqtt: {port: 70000}\n", "`mqtt.port`"),
+        ("mqtt: {port: true}\n", "`mqtt.port`"),
+        ("mqtt: {version: 4}\n", "`mqtt.version`"),
+        ("mqtt: {timeout: -1}\n", "`mqtt.timeout`"),
+        ("mqtt: {exit_on_fail: 'no thanks'}\n", "`mqtt.exit_on_fail`"),
+        ("mqtt: {base_topic: 'red/#'}\n", "`mqtt.base_topic`"),
+        ("mqtt: {topic: {set: 'a/b'}}\n", "`mqtt.topic.set`"),
+        ("homeassistant: {discovery: 'yes'}\n", "`homeassistant.discovery`"),
+        (
+            "homeassistant: {discovery_interval: 0}\n",
+            "`homeassistant.discovery_interval`",
+        ),
+        ("homeassistant: {expire_after: -1}\n", "`homeassistant.expire_after`"),
+        ("hostname: {name: 'my pi/2'}\n", "`hostname.name`"),
+        ("hostname: {name: ''}\n", "`hostname.name`"),
+        ("ina: {address: 0x80}\n", "`ina.address`"),
+        ("ina: {address: '0x40'}\n", "`ina.address`"),
+        ("ina: {monitor_interval: 0}\n", "`ina.monitor_interval`"),
+        ("ina: {shunt_ohms: .nan}\n", "`ina.shunt_ohms`"),
+        ("system: {shutdown: ''}\n", "`system.shutdown`"),
+    ],
+)
+def test_linked_config_rejects_invalid_values(tmp_path, override, path):
+    """Invalid static values stop start-up with a message naming the option."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text(override)
+
+    with pytest.raises(ConfigurationError, match=path):
+        LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+
+
+def test_linked_config_lists_every_invalid_value(tmp_path):
+    """All problems are reported at once, not one per restart."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text("mqtt: {port: 0, version: 4}\n")
+
+    with pytest.raises(ConfigurationError) as error:
+        LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+
+    assert "`mqtt.port`" in str(error.value)
+    assert "`mqtt.version`" in str(error.value)
+
+
+def test_linked_config_converts_quoted_values(tmp_path):
+    """Quoted numbers and booleans that earlier versions accepted still work."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text(
+        "mqtt: {port: '1884', exit_on_fail: 'False'}\n"
+        "ina: {shunt_ohms: '0.1'}\n",
+    )
+
+    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+
+    assert config.static["mqtt"]["port"] == 1884
+    assert config.static["mqtt"]["exit_on_fail"] is False
+    assert config.static["ina"]["shunt_ohms"] == 0.1
