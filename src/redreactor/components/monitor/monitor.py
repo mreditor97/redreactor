@@ -17,6 +17,7 @@ from redreactor.const import (
     DEFAULT_BATTERY_VOLTAGE_MINIMUM,
     DEFAULT_BATTERY_WARNING_THRESHOLD,
     DEFAULT_REPORT_INTERVAL,
+    DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS,
 )
 from redreactor.helpers.cpu_utils import (
     decode_cpu_stat_text,
@@ -47,6 +48,9 @@ class Monitor:
 
     # Adds default values into the Monitor Data dict
     data: MonitorData
+
+    # Consecutive monitor readings at 0% without external power
+    _empty_readings: int = 0
 
     # Timers
     monitor_timer: RepeatTimer  # Runs Monitoring calculations
@@ -184,7 +188,17 @@ class Monitor:
             self._update()
 
         if self.data.battery_level == 0.0 and not self.data.external_power:
-            shutdown = True
+            self._empty_readings += 1
+            shutdown = self._empty_readings >= DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS
+            if not shutdown:
+                self.logger.warning(
+                    "Battery empty at %fV, reading %i of %i before shutdown",
+                    round(self.data.voltage, 2),
+                    self._empty_readings,
+                    DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS,
+                )
+        else:
+            self._empty_readings = 0
 
         # Voltage above the nominal maximum indicates external power is present
         # (e.g. charger connected but INA219 current read was noisy/stale).
@@ -367,8 +381,8 @@ class Monitor:
         _client: Client,
         _userdata: Any,
         _flags: Any,
-        _rc: Any,
-        _reasoncode: Any = None,
+        _reason_code: Any,
+        _properties: Any = None,
     ) -> None:
         """On MQTT Connect.
 

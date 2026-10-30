@@ -7,11 +7,17 @@ from __future__ import annotations
 
 import logging
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from paho.mqtt.client import Client, MQTTMessage, MQTTv5, MQTTv311
+from paho.mqtt.enums import CallbackAPIVersion
 
 from redreactor.helpers.emitter import EventEmitter
+
+if TYPE_CHECKING:
+    from paho.mqtt.client import DisconnectFlags
+    from paho.mqtt.properties import Properties
+    from paho.mqtt.reasoncodes import ReasonCode
 
 
 class MQTT:
@@ -61,34 +67,37 @@ class MQTT:
         )
 
         try:
+            version = int(static_configuration["mqtt"]["version"])
+
             # Check to see if the MQTT Version being used is MQTT V5
-            if int(static_configuration["mqtt"]["version"]) == 5:
+            if version == 5:
                 self._client = Client(
+                    callback_api_version=CallbackAPIVersion.VERSION2,
                     client_id=static_configuration["mqtt"]["client_id"],
                     protocol=MQTTv5,
                     transport=static_configuration["mqtt"]["transport"],
                 )
 
             # Check to see if the MQTT Version being used is MQTT V3.11
-            if int(static_configuration["mqtt"]["version"]) == 3:
+            elif version == 3:
                 self._client = Client(
+                    callback_api_version=CallbackAPIVersion.VERSION2,
                     client_id=static_configuration["mqtt"]["client_id"],
                     protocol=MQTTv311,
                     clean_session=True,
                     transport=static_configuration["mqtt"]["transport"],
                 )
-        except (ValueError, AttributeError):
-            self.logger.exception("MQTT Client Error")
 
-            if self._exit_on_fail:
-                sys.exit(1)
-        except NameError:
+            else:
+                msg = f"Invalid MQTT version {version}"
+                raise ValueError(msg)  # noqa: TRY301
+        except (ValueError, TypeError):
+            # Without a client nothing else can work, so this always exits
             self.logger.exception(
-                "MQTT Client Version number is invalid, must be `3` or `5`",
+                "MQTT Client Error, the MQTT version must be `3` or `5` and the "
+                "transport `tcp`, `websockets` or `unix`",
             )
-
-            if self._exit_on_fail:
-                sys.exit(1)
+            sys.exit(1)
 
         self._client.on_connect = self._mqtt_on_connect
         self._client.on_disconnect = self._mqtt_on_disconnect
@@ -151,11 +160,11 @@ class MQTT:
         client: Client,
         userdata: Any,
         flags: Any,
-        rc: Any,
-        reasoncode: Any = None,
+        reason_code: ReasonCode,
+        properties: Properties | None = None,
     ) -> None:
-        """MQTT Connect event."""
-        if rc == 0:
+        """MQTT Connect event (paho callback API version 2)."""
+        if not reason_code.is_failure:
             self.logger.info("Connected to MQTT Broker")
 
             # Replace any retained Last Will `offline` straight away, rather
@@ -175,31 +184,36 @@ class MQTT:
                 client,
                 userdata,
                 flags,
-                rc,
-                reasoncode,
+                reason_code,
+                properties,
             )
         else:
-            self.logger.error("MQTT Broker connection refused, error code %i", rc)
+            self.logger.error(
+                "MQTT Broker connection refused, reason: %s",
+                reason_code,
+            )
 
     def _mqtt_on_disconnect(
         self,
         client: Client,
         userdata: Any,
-        rc: Any,
-        reasoncode: Any = None,
+        disconnect_flags: DisconnectFlags,
+        reason_code: ReasonCode,
+        properties: Properties | None = None,
     ) -> None:
-        """MQTT Disconnect event."""
+        """MQTT Disconnect event (paho callback API version 2)."""
         self.logger.debug("Notifying listeners of client disconnect")
 
         self.event.emit(
             "on_disconnect",
             client,
             userdata,
-            rc,
-            reasoncode,
+            disconnect_flags,
+            reason_code,
+            properties,
         )
 
-        self.logger.info("Disconnected from broker")
+        self.logger.info("Disconnected from broker, reason: %s", reason_code)
 
     def _mqtt_on_message(
         self,

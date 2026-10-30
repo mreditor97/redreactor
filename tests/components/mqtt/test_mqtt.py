@@ -5,10 +5,14 @@ from __future__ import annotations
 from unittest.mock import MagicMock, call, patch
 
 import pytest
+from paho.mqtt.packettypes import PacketTypes
+from paho.mqtt.reasoncodes import ReasonCode
 
 from redreactor.helpers.emitter import EventEmitter
 
 CLIENT = "redreactor.components.mqtt.mqtt.Client"
+SUCCESS = ReasonCode(PacketTypes.CONNACK, identifier=0)
+NOT_AUTHORIZED = ReasonCode(PacketTypes.CONNACK, identifier=135)
 
 
 @pytest.fixture(autouse=True)
@@ -51,7 +55,7 @@ def test_on_connect_publishes_retained_online_status(static_config):
     """Connecting replaces any retained offline status straight away."""
     mqtt, client = _make_mqtt(static_config)
 
-    mqtt._mqtt_on_connect(client, None, None, 0)
+    mqtt._mqtt_on_connect(client, None, None, SUCCESS)
 
     client.publish.assert_called_once_with(
         topic="redreactor/redreactor/status",
@@ -148,7 +152,7 @@ def test_on_connect_reaches_real_listeners(static_config, dynamic_config, mock_i
         homeassistant.configuration_report_timer,
         "start",
     ) as discovery_start:
-        mqtt._mqtt_on_connect(client, None, None, 0)
+        mqtt._mqtt_on_connect(client, None, None, SUCCESS)
 
     report_start.assert_called_once()
     discovery_start.assert_called_once()
@@ -168,3 +172,45 @@ def test_on_message_reaches_commander(static_config, dynamic_config):
     mqtt._mqtt_on_message(client, None, message)
 
     assert dynamic_config.data["report_interval"] == 60
+
+
+def test_refused_connection_does_not_notify_listeners(static_config):
+    """A failed CONNACK is logged and does not start the components."""
+    from redreactor.components.mqtt import MQTT
+
+    mqtt, client = _make_mqtt(static_config)
+    connected = []
+    MQTT.event.on("on_connect", lambda *args: connected.append(args))
+
+    mqtt._mqtt_on_connect(client, None, None, NOT_AUTHORIZED)
+
+    assert not connected
+    client.publish.assert_not_called()
+
+
+def test_client_uses_callback_api_version_2(static_config):
+    """The deprecated paho callback API version 1 is not used."""
+    from paho.mqtt.enums import CallbackAPIVersion
+
+    from redreactor.components.mqtt import MQTT
+
+    with patch(CLIENT) as mock_client_class:
+        MQTT(static_config)
+
+    assert (
+        mock_client_class.call_args.kwargs["callback_api_version"]
+        == CallbackAPIVersion.VERSION2
+    )
+
+
+@pytest.mark.parametrize("version", [4, "abc"])
+def test_invalid_mqtt_version_exits(static_config, version):
+    """An MQTT version other than 3 or 5 exits instead of failing later."""
+    from redreactor.components.mqtt import MQTT
+
+    static_config["mqtt"]["version"] = version
+
+    with patch(CLIENT), pytest.raises(SystemExit) as exit_info:
+        MQTT(static_config, exit_on_fail=False)
+
+    assert exit_info.value.code == 1
