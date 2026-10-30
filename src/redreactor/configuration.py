@@ -6,6 +6,8 @@ Contains the ability to read the static and dynamic configuration files.
 from __future__ import annotations
 
 import json
+import logging
+import math
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,7 @@ import yaml
 
 from redreactor.const import (
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
+    DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
     DEFAULT_BATTERY_VOLTAGE_MINIMUM,
     DEFAULT_BATTERY_WARNING_THRESHOLD,
     DEFAULT_INA_I2C_ADDRESS,
@@ -23,6 +26,8 @@ from redreactor.const import (
 )
 from redreactor.helpers.emitter import EventEmitter
 from redreactor.helpers.utils import dict_merge
+
+logger = logging.getLogger("Red Reactor")
 
 
 class DynamicConfiguration:
@@ -64,7 +69,42 @@ class DynamicConfiguration:
 
         # Simple dict unpack is fine here — the dynamic config is flat (no
         # nested dicts), so override values win without recursive merging.
-        return {**dynamic_file_defaults, **dynamic_file_override}
+        data = {**dynamic_file_defaults, **dynamic_file_override}
+
+        # Older versions stored received values without checking them, so a
+        # non-numeric value would stop the service from ever starting again.
+        for key, default in dynamic_file_defaults.items():
+            value = data[key]
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int | float)
+                or not math.isfinite(value)
+            ):
+                logger.warning(
+                    "Invalid %s value %r in %s, using the default %s",
+                    key,
+                    value,
+                    self._dynamic_file,
+                    default,
+                )
+                data[key] = default
+
+        # An inverted voltage range would disable low battery shutdown
+        if (
+            data["battery_voltage_minimum"]
+            >= data["battery_voltage_maximum"] - DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP
+        ):
+            logger.warning(
+                "Battery voltage minimum %s is not below maximum %s in %s, "
+                "using the defaults",
+                data["battery_voltage_minimum"],
+                data["battery_voltage_maximum"],
+                self._dynamic_file,
+            )
+            data["battery_voltage_minimum"] = DEFAULT_BATTERY_VOLTAGE_MINIMUM
+            data["battery_voltage_maximum"] = DEFAULT_BATTERY_VOLTAGE_MAXIMUM
+
+        return data
 
     def write(self) -> None:
         """Write dynamic configuration file."""

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -97,8 +98,33 @@ def test_on_message_button_calls_on_command(commander, static_config):
 
     with patch.object(cmd, "_on_command") as mock_cmd:
         cmd._on_message(None, None, msg)
+        # The command runs on its own thread, wait for it to finish
+        for thread in threading.enumerate():
+            if thread.name == "redreactor-shutdown":
+                thread.join(timeout=5)
 
     mock_cmd.assert_called_once_with(event_type="shutdown")
+
+
+def test_on_message_button_runs_off_the_mqtt_thread(commander, static_config):
+    """Button commands are not run inside the paho on_message callback."""
+    cmd, _ = commander
+    base = static_config["mqtt"]["base_topic"]
+    host = static_config["hostname"]["name"]
+    set_topic = static_config["mqtt"]["topic"]["set"]
+    topic = f"{base}/{host}/{set_topic}/restart"
+
+    msg = _make_mock_message(topic, json.dumps("PRESS"))
+
+    target = "redreactor.components.commander.commander.threading.Thread"
+    with patch(target) as mock_thread, patch.object(cmd, "_on_command") as mock_cmd:
+        cmd._on_message(None, None, msg)
+
+    mock_cmd.assert_not_called()
+    mock_thread.assert_called_once()
+    assert mock_thread.call_args.kwargs["target"] is mock_cmd
+    assert mock_thread.call_args.kwargs["kwargs"] == {"event_type": "restart"}
+    mock_thread.return_value.start.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -119,6 +145,70 @@ def test_on_message_number_updates_dynamic_config(commander, static_config):
     cmd._on_message(None, None, msg)
 
     assert cmd._dynamic_configuration.data["report_interval"] == 60
+
+
+def _send_number(cmd, static_config, field: str, payload: str) -> None:
+    base = static_config["mqtt"]["base_topic"]
+    host = static_config["hostname"]["name"]
+    set_topic = static_config["mqtt"]["topic"]["set"]
+    msg = _make_mock_message(f"{base}/{host}/{set_topic}/{field}", payload)
+    cmd._on_message(None, None, msg)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    ['"abc"', "null", "true", "[30]", '{"value": 30}', "NaN", "Infinity"],
+)
+def test_on_message_number_rejects_non_numbers(commander, static_config, payload):
+    """Non-numeric number commands are not stored or written to disk."""
+    cmd, _ = commander
+    written = []
+    cmd._dynamic_configuration.event.on("write", lambda: written.append(True))
+
+    _send_number(cmd, static_config, "report_interval", payload)
+
+    assert cmd._dynamic_configuration.data["report_interval"] == 30
+    assert not written
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("report_interval", 0),
+        ("report_interval", 301),
+        ("battery_warning_threshold", -1),
+        ("battery_voltage_minimum", 2.4),
+        ("battery_voltage_maximum", 4.6),
+    ],
+)
+def test_on_message_number_rejects_out_of_range(commander, static_config, field, value):
+    """Number commands outside the field's min/max are ignored."""
+    cmd, _ = commander
+    before = cmd._dynamic_configuration.data[field]
+
+    _send_number(cmd, static_config, field, json.dumps(value))
+
+    assert cmd._dynamic_configuration.data[field] == before
+
+
+def test_on_message_rejects_minimum_voltage_above_maximum(commander, static_config):
+    """A minimum voltage at or above the maximum would disable low battery shutdown."""
+    cmd, _ = commander
+
+    _send_number(cmd, static_config, "battery_voltage_minimum", "4.5")
+    _send_number(cmd, static_config, "battery_voltage_maximum", "2.9")
+
+    assert cmd._dynamic_configuration.data["battery_voltage_minimum"] == 2.9
+    assert cmd._dynamic_configuration.data["battery_voltage_maximum"] == 4.2
+
+
+def test_on_message_accepts_valid_voltage_change(commander, static_config):
+    """A valid voltage within range and below the maximum is stored."""
+    cmd, _ = commander
+
+    _send_number(cmd, static_config, "battery_voltage_minimum", "3.1")
+
+    assert cmd._dynamic_configuration.data["battery_voltage_minimum"] == 3.1
 
 
 # ---------------------------------------------------------------------------
@@ -169,43 +259,49 @@ def test_on_message_unknown_topic_logs_warning(commander, static_config):
 
 
 def test_on_command_shutdown_emits_publish_and_exits(commander):
-    """_on_command('shutdown') emits publish, calls subprocess.run, and sys.exit."""
+    """_on_command('shutdown') publishes offline, runs the command, disconnects."""
     cmd, _ = commander
     from redreactor.components.mqtt import MQTT
 
     publish_calls: list[tuple[str, str]] = []
     MQTT.event.on(
         "publish",
-        lambda topic, payload: publish_calls.append((topic, payload)),
+        lambda topic, payload, **_: publish_calls.append((topic, payload)),
     )
 
+    disconnect_calls: list[bool] = []
+    MQTT.event.on("disconnect", lambda: disconnect_calls.append(True))
+
     target = "redreactor.components.commander.commander.subprocess.run"
-    with patch(target) as mock_run, patch("sys.exit") as mock_exit, patch("time.sleep"):
+    with patch(target) as mock_run, patch("time.sleep"):
         cmd._on_command("shutdown")
 
     assert publish_calls, "publish event was not emitted"
     mock_run.assert_called_once()
-    mock_exit.assert_called_once_with(0)
+    assert disconnect_calls == [True]
 
 
 def test_on_command_restart_emits_publish_and_exits(commander):
-    """_on_command('restart') emits publish, calls subprocess.run, and sys.exit."""
+    """_on_command('restart') publishes offline, runs the command, disconnects."""
     cmd, _ = commander
     from redreactor.components.mqtt import MQTT
 
     publish_calls: list[tuple[str, str]] = []
     MQTT.event.on(
         "publish",
-        lambda topic, payload: publish_calls.append((topic, payload)),
+        lambda topic, payload, **_: publish_calls.append((topic, payload)),
     )
 
+    disconnect_calls: list[bool] = []
+    MQTT.event.on("disconnect", lambda: disconnect_calls.append(True))
+
     target = "redreactor.components.commander.commander.subprocess.run"
-    with patch(target) as mock_run, patch("sys.exit") as mock_exit, patch("time.sleep"):
+    with patch(target) as mock_run, patch("time.sleep"):
         cmd._on_command("restart")
 
     assert publish_calls
     mock_run.assert_called_once()
-    mock_exit.assert_called_once_with(0)
+    assert disconnect_calls == [True]
 
 
 def test_on_command_invalid_raises_value_error(commander):
