@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import time
 from typing import TYPE_CHECKING, Any
 
 from ina219 import INA219, DeviceRangeError
@@ -34,6 +35,40 @@ if TYPE_CHECKING:
     from redreactor.configuration import DynamicConfiguration
 
 
+def read_once(static_configuration: dict[str, Any]) -> dict[str, Any]:
+    """Read the Red Reactor once, without starting the monitoring service.
+
+    Used by `--check` to confirm the I2C setup. Exits with a non-zero code if
+    the INA219 can't be reached.
+    """
+    ina_configuration = static_configuration["ina"]
+    try:
+        ina = INA219(
+            shunt_ohms=ina_configuration["shunt_ohms"],
+            max_expected_amps=ina_configuration["max_expected_amps"],
+            address=ina_configuration["address"],
+            busnum=int(ina_configuration["bus"]),
+            log_level=logging.ERROR,
+        )
+        ina.configure(voltage_range=ina.RANGE_16V)
+        current = ina.current()
+        return {
+            "i2c_bus": int(ina_configuration["bus"]),
+            "i2c_address": hex(ina_configuration["address"]),
+            "voltage": round(ina.voltage(), 3),
+            "current": round(current, 4),
+            "power": round(ina.power() / 1000, 3),
+            "charging": current < 0,
+        }
+    except (OSError, ModuleNotFoundError, DeviceRangeError):
+        logging.getLogger("Red Reactor").exception(
+            "Unable to read the Red Reactor on I2C bus %s at address %s",
+            ina_configuration["bus"],
+            hex(ina_configuration["address"]),
+        )
+        sys.exit(1)
+
+
 class Monitor:
     """Monitor module.
 
@@ -50,8 +85,15 @@ class Monitor:
     # Adds default values into the Monitor Data dict
     data: MonitorData
 
-    # Consecutive monitor readings at 0% without external power
+    # Consecutive monitor readings at or below the warning threshold without
+    # external power
     _empty_readings: int = 0
+
+    # Whether the first reading after start up has been checked
+    _start_up_checked: bool = False
+
+    # time.monotonic() when external power was lost, None while it is present
+    _on_battery_since: float | None = None
 
     # Timers
     monitor_timer: RepeatTimer  # Runs Monitoring calculations
@@ -104,7 +146,7 @@ class Monitor:
                 shunt_ohms=static_configuration["ina"]["shunt_ohms"],
                 max_expected_amps=static_configuration["ina"]["max_expected_amps"],
                 address=static_configuration["ina"]["address"],
-                busnum=1,
+                busnum=int(static_configuration["ina"]["bus"]),
                 log_level=logging.ERROR,
             )
             ina.configure(voltage_range=ina.RANGE_16V)
@@ -122,7 +164,7 @@ class Monitor:
         )
         self.monitor_timer.start()
 
-    def _monitor(self, ina: INA219) -> None:  # noqa: C901, PLR0912
+    def _monitor(self, ina: INA219) -> None:  # noqa: C901, PLR0912, PLR0915
         """Monitor INA Thread Loop.
 
         Gets called every 'monitor_interval'.
@@ -141,10 +183,15 @@ class Monitor:
                     self.data.voltage,
                 )
                 self.data.current = ina.current()
+                # pi-ina219 reports milliwatts, Home Assistant is sent watts
+                self.data.power = ina.power() / 1000
+                # A negative current means the battery is being charged
+                self.data.charging = self.data.current < 0
             except DeviceRangeError:
                 # Assume no external power so the device will still shutdown on a low voltage reading # noqa: E501
                 self.logger.exception("Battery current range error")
                 self.data.external_power = False
+                self.data.charging = False
                 self.data.current = 6000
 
                 MQTT.event.emit(
@@ -192,6 +239,10 @@ class Monitor:
             self.data.external_power = True
             self._update()
 
+        if ina and not self._start_up_checked:
+            self._start_up_checked = True
+            self._check_start_up_charge()
+
         if (
             self.data.battery_level <= float(self.data.battery_warning_threshold)
             and not self.data.external_power
@@ -200,18 +251,23 @@ class Monitor:
             # waiting for the next scheduled report_interval tick.
             self._update()
 
-        if self.data.battery_level == 0.0 and not self.data.external_power:
             self._empty_readings += 1
             shutdown = self._empty_readings >= DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS
             if not shutdown:
                 self.logger.warning(
-                    "Battery empty at %fV, reading %i of %i before shutdown",
+                    "Battery at %i%% (%fV), at or below the %i%% warning threshold, "
+                    "reading %i of %i before shutdown",
+                    self.data.battery_level,
                     round(self.data.voltage, 2),
+                    self.data.battery_warning_threshold,
                     self._empty_readings,
                     DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS,
                 )
         else:
             self._empty_readings = 0
+
+        if self._battery_runtime_exceeded():
+            shutdown = True
 
         # Shutdown system
         if shutdown:
@@ -222,6 +278,71 @@ class Monitor:
 
             # Emit the shutdown event
             self.event.emit("shutdown")
+
+    def _check_start_up_charge(self) -> None:
+        """Check the battery is charging if it starts below the warning threshold.
+
+        After a low battery shutdown the device is usually started again by
+        external power returning, with the battery still below the shutdown
+        level. That is safe while it charges. Without external power it would
+        drain the battery further, so the usual shutdown check (which only
+        runs without external power) shuts it down again. External power with
+        no charge current means the battery isn't recovering, which is logged
+        so it can be looked into.
+        """
+        if self.data.battery_level > self.data.battery_warning_threshold:
+            return
+
+        if not self.data.external_power:
+            self.logger.warning(
+                "Started at %i%%, below the %i%% warning threshold without external "
+                "power, shutting down again unless power is connected",
+                self.data.battery_level,
+                self.data.battery_warning_threshold,
+            )
+        elif self.data.charging:
+            self.logger.info(
+                "Started at %i%%, below the %i%% warning threshold, the battery is "
+                "charging so staying on",
+                self.data.battery_level,
+                self.data.battery_warning_threshold,
+            )
+        else:
+            self.logger.warning(
+                "Started at %i%%, below the %i%% warning threshold, external power is "
+                "connected but the battery is not charging (%fmA)",
+                self.data.battery_level,
+                self.data.battery_warning_threshold,
+                self.data.current,
+            )
+
+    def _battery_runtime_exceeded(self) -> bool:
+        """Check whether the device has been on battery for too long.
+
+        Tracks how long external power has been missing, and returns True once
+        that is longer than the battery runtime limit. A limit of 0 disables it.
+        """
+        if self.data.external_power:
+            self._on_battery_since = None
+            return False
+
+        now = time.monotonic()
+        if self._on_battery_since is None:
+            self._on_battery_since = now
+
+        if self.data.battery_runtime_limit <= 0:
+            return False
+
+        on_battery_minutes = (now - self._on_battery_since) / 60
+        if on_battery_minutes < self.data.battery_runtime_limit:
+            return False
+
+        self.logger.warning(
+            "On battery for %.1f minutes, over the %i minute runtime limit",
+            on_battery_minutes,
+            self.data.battery_runtime_limit,
+        )
+        return True
 
     def _calculate_battery_level(self, voltage: float) -> int:
         """Calculate Battery Level.
@@ -318,6 +439,10 @@ class Monitor:
                         self.data.current,
                         4,
                     ),
+                    f"{self._static_configuration['fields']['power']['name']}": round(
+                        self.data.power,
+                        3,
+                    ),
                     f"{self._static_configuration['fields']['battery_level']['name']}": self.data.battery_level,  # noqa: E501
                     f"{self._static_configuration['fields']['external_power']['name']}": (  # noqa: E501
                         self._static_configuration["fields"][  # noqa: E501
@@ -332,6 +457,17 @@ class Monitor:
                             "OFF",
                         )
                     ),
+                    f"{self._static_configuration['fields']['charging']['name']}": (
+                        self._static_configuration["fields"]["charging"].get(
+                            "payload_on",
+                            "ON",
+                        )
+                        if self.data.charging
+                        else self._static_configuration["fields"]["charging"].get(
+                            "payload_off",
+                            "OFF",
+                        )
+                    ),
                     f"{self._static_configuration['fields']['cpu_temperature']['name']}": self.data.cpu_temperature,  # noqa: E501
                     f"{self._static_configuration['fields']['cpu_stat_raw']['name']}": self.data.cpu_stat_raw,  # noqa: E501
                     f"{self._static_configuration['fields']['cpu_stat_text']['name']}": self.data.cpu_stat_text,  # noqa: E501
@@ -339,6 +475,7 @@ class Monitor:
                     f"{self._static_configuration['fields']['battery_voltage_minimum']['name']}": self.data.battery_voltage_minimum,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_voltage_maximum']['name']}": self.data.battery_voltage_maximum,  # noqa: E501
                     f"{self._static_configuration['fields']['report_interval']['name']}": self.data.report_interval,  # noqa: E501
+                    f"{self._static_configuration['fields']['battery_runtime_limit']['name']}": self.data.battery_runtime_limit,  # noqa: E501
                 },
             ),
         )
@@ -368,6 +505,11 @@ class Monitor:
         # Update Report Interval
         self.data.report_interval = int(
             self._dynamic_configuration.data["report_interval"],
+        )
+
+        # Update Battery Runtime Limit
+        self.data.battery_runtime_limit = int(
+            self._dynamic_configuration.data["battery_runtime_limit"],
         )
 
         if self.report_timer:

@@ -179,3 +179,54 @@ def test_linked_config_keeps_configured_client_id(tmp_path):
     config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
 
     assert config.static["mqtt"]["client_id"] == "my-client"
+
+
+def test_dynamic_config_defaults_battery_runtime_limit_to_off(tmp_path):
+    """Older dynamic files without the runtime limit get it switched off."""
+    dynamic_file = tmp_path / "dynamic.json"
+    dynamic_file.write_text(json.dumps({"report_interval": 60}))
+
+    config = DynamicConfiguration(dynamic_file=str(dynamic_file))
+
+    assert config.data["battery_runtime_limit"] == 0
+    assert config.data["report_interval"] == 60
+
+
+def test_linked_config_new_defaults(tmp_path):
+    """New options have defaults, so existing config files keep working."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text(yaml.dump({"hostname": {"name": "garage-pi"}}))
+
+    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+
+    assert config.static["ina"]["bus"] == 1
+    assert config.static["mqtt"]["tls"]["enabled"] is False
+    assert config.static["fields"]["power"]["unit"] == "W"
+    assert config.static["fields"]["charging"]["type"] == "binary_sensor"
+    assert config.static["fields"]["battery_runtime_limit"]["type"] == "number"
+    assert config.static["fields"]["cpu_stat_raw"]["state_class"] is None
+    assert (
+        config.static["fields"]["battery_warning_threshold"]["pretty"]
+        == "Battery shutdown level"
+    )
+
+
+def test_linked_config_overrides_new_options(tmp_path):
+    """The I2C bus and TLS can be set from the config file."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text(
+        yaml.dump(
+            {
+                "ina": {"bus": 0},
+                "mqtt": {"tls": {"enabled": True, "ca_certs": "/etc/ca.crt"}},
+            },
+        ),
+    )
+
+    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+
+    assert config.static["ina"]["bus"] == 0
+    assert config.static["ina"]["address"] == 0x40
+    assert config.static["mqtt"]["tls"]["enabled"] is True
+    assert config.static["mqtt"]["tls"]["ca_certs"] == "/etc/ca.crt"
+    assert config.static["mqtt"]["tls"]["insecure"] is False

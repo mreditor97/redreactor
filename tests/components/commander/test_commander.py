@@ -179,6 +179,8 @@ def test_on_message_number_rejects_non_numbers(commander, static_config, payload
         ("battery_warning_threshold", -1),
         ("battery_voltage_minimum", 2.4),
         ("battery_voltage_maximum", 4.6),
+        ("battery_runtime_limit", -1),
+        ("battery_runtime_limit", 1441),
     ],
 )
 def test_on_message_number_rejects_out_of_range(commander, static_config, field, value):
@@ -382,3 +384,12 @@ def test_on_message_requires_exact_field_name(commander, static_config):
 
     assert cmd._dynamic_configuration.data["report_interval"] == 30
     mock_warn.assert_called_once()
+
+
+def test_on_message_sets_battery_runtime_limit(commander, static_config):
+    """The battery runtime limit can be changed from Home Assistant."""
+    cmd, _ = commander
+
+    _send_number(cmd, static_config, "battery_runtime_limit", "15")
+
+    assert cmd._dynamic_configuration.data["battery_runtime_limit"] == 15

@@ -15,11 +15,13 @@ from typing import Any
 import yaml
 
 from redreactor.const import (
+    DEFAULT_BATTERY_RUNTIME_LIMIT,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
     DEFAULT_BATTERY_VOLTAGE_MINIMUM,
     DEFAULT_BATTERY_WARNING_THRESHOLD,
     DEFAULT_INA_I2C_ADDRESS,
+    DEFAULT_INA_I2C_BUS,
     DEFAULT_INA_MAX_EXPECTED_AMPS,
     DEFAULT_INA_MONITOR_INTERVAL,
     DEFAULT_INA_SHUNT_OHMS,
@@ -58,6 +60,7 @@ class DynamicConfiguration:
             "battery_warning_threshold": DEFAULT_BATTERY_WARNING_THRESHOLD,
             "battery_voltage_minimum": DEFAULT_BATTERY_VOLTAGE_MINIMUM,
             "battery_voltage_maximum": DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
+            "battery_runtime_limit": DEFAULT_BATTERY_RUNTIME_LIMIT,
         }
 
         dynamic_path = Path(self._dynamic_file)
@@ -157,6 +160,13 @@ class LinkedConfiguration:
                 "version": 3,
                 "transport": "tcp",
                 "timeout": 120,
+                "tls": {
+                    "enabled": False,
+                    "ca_certs": None,
+                    "certfile": None,
+                    "keyfile": None,
+                    "insecure": False,
+                },
                 "topic": {
                     "state": "state",
                     "status": "status",
@@ -192,6 +202,14 @@ class LinkedConfiguration:
                     "device_class": "current",
                     "suggested_display_precision": 2,
                 },
+                "power": {
+                    "name": "power",
+                    "pretty": "Power",
+                    "type": "sensor",
+                    "unit": "W",
+                    "device_class": "power",
+                    "suggested_display_precision": 2,
+                },
                 "battery_level": {
                     "name": "battery_level",
                     "pretty": "Battery level",
@@ -205,6 +223,12 @@ class LinkedConfiguration:
                     "type": "binary_sensor",
                     "device_class": "plug",
                     "entity_category": "diagnostic",
+                },
+                "charging": {
+                    "name": "charging",
+                    "pretty": "Charging",
+                    "type": "binary_sensor",
+                    "device_class": "battery_charging",
                 },
                 "cpu_temperature": {
                     "name": "cpu_temperature",
@@ -221,6 +245,8 @@ class LinkedConfiguration:
                     "type": "sensor",
                     "entity_category": "diagnostic",
                     "enabled_by_default": False,
+                    # A bitmask, so long-term statistics would be meaningless
+                    "state_class": None,
                 },
                 "cpu_stat_text": {
                     "name": "cpu_stat",
@@ -231,7 +257,7 @@ class LinkedConfiguration:
                 },
                 "battery_warning_threshold": {
                     "name": "battery_warning_threshold",
-                    "pretty": "Battery warning",
+                    "pretty": "Battery shutdown level",
                     "type": "number",
                     "unit": "%",
                     "device_class": "battery",
@@ -276,6 +302,18 @@ class LinkedConfiguration:
                     "mode": "box",
                     "step": 5,
                 },
+                "battery_runtime_limit": {
+                    "name": "battery_runtime_limit",
+                    "pretty": "Battery runtime limit",
+                    "type": "number",
+                    "unit": "min",
+                    "device_class": "duration",
+                    "entity_category": "diagnostic",
+                    "min": 0,
+                    "max": 1440,
+                    "mode": "box",
+                    "step": 1,
+                },
                 "restart": {
                     "name": "restart",
                     "pretty": "Restart",
@@ -294,6 +332,7 @@ class LinkedConfiguration:
                 "shunt_ohms": DEFAULT_INA_SHUNT_OHMS,
                 "max_expected_amps": DEFAULT_INA_MAX_EXPECTED_AMPS,
                 "monitor_interval": DEFAULT_INA_MONITOR_INTERVAL,
+                "bus": DEFAULT_INA_I2C_BUS,
             },
             "system": {
                 "shutdown": "sudo shutdown 0 -h",

@@ -108,6 +108,8 @@ class MQTT:
             static_configuration["mqtt"]["password"],
         )
 
+        self._configure_tls(static_configuration["mqtt"].get("tls") or {})
+
         # The Last Will is sent inside the CONNECT packet, so it must be set
         # before connect() for it to cover the first session too. paho keeps it
         # for every automatic reconnect after that.
@@ -117,6 +119,35 @@ class MQTT:
             qos=1,
             retain=True,
         )
+
+    def _configure_tls(self, tls_configuration: dict[str, Any]) -> None:
+        """Enable TLS on the connection when it is configured.
+
+        With no `ca_certs` the system's default certificate authorities are used.
+        `certfile` and `keyfile` are only needed for client certificate login.
+        """
+        if not tls_configuration.get("enabled"):
+            return
+
+        self.logger.info("Using TLS for the MQTT connection")
+        try:
+            self._client.tls_set(
+                ca_certs=tls_configuration.get("ca_certs") or None,
+                certfile=tls_configuration.get("certfile") or None,
+                keyfile=tls_configuration.get("keyfile") or None,
+            )
+        except (OSError, ValueError):
+            # Without the requested TLS setup, connecting would either fail or
+            # silently fall back to an unencrypted connection, so always exit
+            self.logger.exception("MQTT TLS configuration error")
+            sys.exit(1)
+
+        if tls_configuration.get("insecure"):
+            self.logger.warning(
+                "MQTT TLS hostname verification is disabled, "
+                "only use this for testing",
+            )
+            self._client.tls_insecure_set(True)  # noqa: FBT003
 
     @property
     def _status_topic(self) -> str:

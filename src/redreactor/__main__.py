@@ -1,14 +1,17 @@
 """Red Reactor bootstrap."""
 
 import argparse
+import json
 import logging
 from importlib.metadata import version
+from logging.handlers import RotatingFileHandler
 
 from redreactor.components.commander import Commander
 from redreactor.components.homeassistant import Homeassistant
-from redreactor.components.monitor import Monitor
+from redreactor.components.monitor import Monitor, read_once
 from redreactor.components.mqtt import MQTT
 from redreactor.configuration import LinkedConfiguration
+from redreactor.const import DEFAULT_LOG_BACKUP_COUNT, DEFAULT_LOG_MAX_BYTES
 
 
 def get_arguments() -> argparse.Namespace:
@@ -35,6 +38,13 @@ def get_arguments() -> argparse.Namespace:
         help="Logging file location",
         dest="logging_file",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Read the Red Reactor once, print the result and exit without "
+        "connecting to MQTT. Useful for checking the I2C setup",
+        dest="check",
+    )
 
     return parser.parse_args()
 
@@ -53,7 +63,11 @@ def main() -> None:
 
     # Create handlers
     c_handler = logging.StreamHandler()
-    f_handler = logging.FileHandler(args.logging_file)
+    f_handler = RotatingFileHandler(
+        args.logging_file,
+        maxBytes=DEFAULT_LOG_MAX_BYTES,
+        backupCount=DEFAULT_LOG_BACKUP_COUNT,
+    )
 
     # Create formatters and add it to handlers
     c_format = logging.Formatter(
@@ -93,6 +107,10 @@ def main() -> None:
             "File log level set to %s",
             configuration.static["logging"]["file"],
         )
+
+    if args.check:
+        print(json.dumps(read_once(configuration.static), indent=2))  # noqa: T201
+        return
 
     # Components register their callbacks on MQTT.event during __init__, so
     # they must all be constructed before mqtt.connect() is called.

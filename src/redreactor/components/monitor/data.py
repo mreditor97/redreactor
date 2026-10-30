@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from redreactor.const import (
+    DEFAULT_BATTERY_RUNTIME_LIMIT,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MINIMUM,
     DEFAULT_BATTERY_WARNING_THRESHOLD,
@@ -15,6 +16,8 @@ class MonitorData:
 
     voltage: float
     current: float
+    power: float
+    charging: bool
     battery_level: float
     external_power: bool
     cpu_temperature: float | None
@@ -24,11 +27,14 @@ class MonitorData:
     battery_voltage_minimum: float
     battery_voltage_maximum: float
     report_interval: int
+    battery_runtime_limit: int
 
     def __init__(  # noqa: PLR0913, PLR0917
         self,
         voltage: float = 0.0,
         current: float = 0.0,
+        power: float = 0.0,
+        charging: bool = False,  # noqa: FBT001, FBT002
         battery_level: float = 0.0,
         external_power: bool = True,  # noqa: FBT001, FBT002
         cpu_temperature: float = 0.0,
@@ -38,10 +44,13 @@ class MonitorData:
         battery_voltage_minimum: float = DEFAULT_BATTERY_VOLTAGE_MINIMUM,
         battery_voltage_maximum: float = DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
         report_interval: int = DEFAULT_REPORT_INTERVAL,
+        battery_runtime_limit: int = DEFAULT_BATTERY_RUNTIME_LIMIT,
     ) -> None:
         """Initialise Monitor Data."""
         self.voltage = voltage
         self.current = current
+        self.power = power
+        self.charging = charging
         self.battery_level = battery_level
         self.external_power = external_power
         self.cpu_temperature = cpu_temperature
@@ -51,3 +60,4 @@ class MonitorData:
         self.battery_voltage_minimum = battery_voltage_minimum
         self.battery_voltage_maximum = battery_voltage_maximum
         self.report_interval = report_interval
+        self.battery_runtime_limit = battery_runtime_limit
