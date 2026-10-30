@@ -101,3 +101,97 @@ def test_configuration_is_not_shared_between_instances(static_config, dynamic_co
 
     assert len(first.configuration) == len(static_config["fields"])
     assert len(second.configuration) == len(static_config["fields"])
+
+
+def _discovery_payloads(homeassistant):
+    """Return the published discovery payloads keyed by topic."""
+    import json
+
+    from redreactor.components.mqtt import MQTT
+
+    published = {}
+    MQTT.event.on(
+        "publish",
+        lambda topic, payload, **_: published.__setitem__(topic, json.loads(payload)),
+    )
+    homeassistant._update_homeassistant_configuration()
+    return published
+
+
+def test_discovery_includes_power_and_charging(homeassistant):
+    """Power is a watt sensor and charging a battery_charging binary sensor."""
+    published = _discovery_payloads(homeassistant)
+
+    power = published["homeassistant/sensor/redreactor_redreactor_power/config"]
+    assert power["device_class"] == "power"
+    assert power["unit_of_measurement"] == "W"
+    assert power["state_class"] == "measurement"
+
+    charging = published[
+        "homeassistant/binary_sensor/redreactor_redreactor_charging/config"
+    ]
+    assert charging["device_class"] == "battery_charging"
+    assert charging["payload_on"] == "ON"
+    assert charging["value_template"] == "{{ value_json.charging }}"
+
+
+def test_discovery_includes_battery_runtime_limit(homeassistant):
+    """The runtime limit is a number entity in minutes with a command topic."""
+    published = _discovery_payloads(homeassistant)
+
+    limit = published[
+        "homeassistant/number/redreactor_redreactor_battery_runtime_limit/config"
+    ]
+    assert limit["command_topic"] == "redreactor/redreactor/set/battery_runtime_limit"
+    assert limit["unit_of_measurement"] == "min"
+    assert limit["device_class"] == "duration"
+    assert (limit["min"], limit["max"], limit["step"]) == (0, 1440, 1)
+
+
+def test_cpu_stat_raw_has_no_state_class(homeassistant):
+    """A bitmask should not get long-term statistics."""
+    published = _discovery_payloads(homeassistant)
+
+    raw = published["homeassistant/sensor/redreactor_redreactor_cpu_stat_raw/config"]
+    assert "state_class" not in raw
+
+
+def test_discovery_omits_entity_id_by_default(homeassistant):
+    """Without configuration Home Assistant picks the entity ID itself."""
+    published = _discovery_payloads(homeassistant)
+
+    for payload in published.values():
+        assert "object_id" not in payload
+        assert "default_entity_id" not in payload
+
+
+def test_default_entity_id_is_published(static_config, dynamic_config):
+    """A configured default_entity_id is passed to Home Assistant."""
+    from redreactor.components.homeassistant import Homeassistant
+
+    static_config["fields"]["voltage"]["default_entity_id"] = "sensor.ups_voltage"
+    published = _discovery_payloads(Homeassistant(static_config, dynamic_config))
+
+    voltage = published["homeassistant/sensor/redreactor_redreactor_voltage/config"]
+    assert voltage["default_entity_id"] == "sensor.ups_voltage"
+
+
+def test_object_id_is_converted_to_default_entity_id(
+    static_config,
+    dynamic_config,
+    caplog,
+):
+    """The deprecated object_id still works, with the domain added."""
+    from redreactor.components.homeassistant import Homeassistant
+
+    static_config["fields"]["external_power"]["object_id"] = "ups_power"
+    with caplog.at_level("WARNING", "Red Reactor"):
+        homeassistant = Homeassistant(static_config, dynamic_config)
+    published = _discovery_payloads(homeassistant)
+
+    external_power = published[
+        "homeassistant/binary_sensor/redreactor_redreactor_external_power/config"
+    ]
+    assert external_power["default_entity_id"] == "binary_sensor.ups_power"
+    assert "object_id" not in external_power
+    assert "deprecated" in caplog.text

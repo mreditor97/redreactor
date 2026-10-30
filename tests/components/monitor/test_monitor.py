@@ -305,3 +305,306 @@ def test_monitor_reads_dynamic_configuration_by_field_key(
     monitor = _make_monitor(static_config, dynamic_config, mock_ina)
 
     assert monitor.data.report_interval == 60
+
+
+# ---------------------------------------------------------------------------
+# Power, charging and the shutdown threshold
+# ---------------------------------------------------------------------------
+
+# With the default 2.9 V to 4.2 V range these read as 7%, 3% and 49%
+VOLTAGE_7_PERCENT = 3.0
+VOLTAGE_3_PERCENT = 2.94
+VOLTAGE_49_PERCENT = 3.53
+
+
+def _shutdown_events(monitor):
+    calls = []
+    monitor.event.on("shutdown", lambda: calls.append(True))
+    return calls
+
+
+def test_monitor_reads_power_in_watts(monitor, mock_ina):
+    """pi-ina219 reports milliwatts, published power is in watts."""
+    mock_ina.power.return_value = 2500.0
+    with patch.object(monitor, "_update"):
+        _run_monitor_with_ina(monitor, mock_ina, current=500.0)
+    assert monitor.data.power == 2.5
+
+
+@pytest.mark.parametrize(
+    ("current", "charging"),
+    [(-50.0, True), (5.0, False), (500.0, False)],
+)
+def test_monitor_charging_follows_current_sign(monitor, mock_ina, current, charging):
+    """Only a negative current means the battery is charging."""
+    with patch.object(monitor, "_update"):
+        _run_monitor_with_ina(monitor, mock_ina, current=current)
+    assert monitor.data.charging is charging
+
+
+def test_monitor_shuts_down_at_warning_threshold(monitor, mock_ina, dynamic_config):
+    """At or below the warning threshold on battery, the device shuts down."""
+    dynamic_config.data["battery_warning_threshold"] = 10
+    shutdown_called = _shutdown_events(monitor)
+
+    with patch.object(monitor, "_update"):
+        for _ in range(DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS):
+            _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_7_PERCENT, 500.0)
+
+    assert monitor.data.battery_level == 7
+    assert shutdown_called
+
+
+def test_monitor_settable_warning_threshold(monitor, mock_ina, dynamic_config):
+    """Raising the threshold shuts down at a higher charge."""
+    dynamic_config.data["battery_warning_threshold"] = 50
+    shutdown_called = _shutdown_events(monitor)
+
+    with patch.object(monitor, "_update"):
+        for _ in range(DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS):
+            _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
+
+    assert monitor.data.battery_warning_threshold == 50
+    assert shutdown_called
+
+
+def test_monitor_above_warning_threshold_does_not_shut_down(
+    monitor,
+    mock_ina,
+    dynamic_config,
+):
+    """Above the threshold on battery it keeps running."""
+    dynamic_config.data["battery_warning_threshold"] = 5
+    shutdown_called = _shutdown_events(monitor)
+
+    with patch.object(monitor, "_update"):
+        for _ in range(DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS + 1):
+            _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_7_PERCENT, 500.0)
+
+    assert not shutdown_called
+
+
+def test_monitor_low_battery_with_external_power_does_not_shut_down(
+    monitor,
+    mock_ina,
+):
+    """Charging below the threshold is safe, so it stays on."""
+    shutdown_called = _shutdown_events(monitor)
+
+    with patch.object(monitor, "_update"):
+        for _ in range(DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS + 1):
+            _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_3_PERCENT, -400.0)
+
+    assert monitor.data.charging is True
+    assert not shutdown_called
+
+
+# ---------------------------------------------------------------------------
+# Start up below the warning threshold
+# ---------------------------------------------------------------------------
+
+
+def test_start_up_below_shutdown_level_while_charging_stays_on(
+    monitor,
+    mock_ina,
+    caplog,
+):
+    """Restarted by power returning, the charging battery keeps it on."""
+    shutdown_called = _shutdown_events(monitor)
+
+    with patch.object(monitor, "_update"), caplog.at_level("INFO", "Red Reactor"):
+        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_3_PERCENT, -400.0)
+
+    assert "the battery is charging so staying on" in caplog.text
+    assert not shutdown_called
+
+
+def test_start_up_below_shutdown_level_on_battery_shuts_down(
+    monitor,
+    mock_ina,
+    caplog,
+):
+    """Started without external power below the level, it shuts down again."""
+    shutdown_called = _shutdown_events(monitor)
+
+    with patch.object(monitor, "_update"), caplog.at_level("INFO", "Red Reactor"):
+        for _ in range(DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS):
+            _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_3_PERCENT, 500.0)
+
+    assert "without external power" in caplog.text
+    assert shutdown_called
+
+
+def test_start_up_below_shutdown_level_not_charging_warns(
+    monitor,
+    mock_ina,
+    caplog,
+):
+    """External power with no charge current is logged as a problem."""
+    with patch.object(monitor, "_update"), caplog.at_level("INFO", "Red Reactor"):
+        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_3_PERCENT, 5.0)
+
+    assert "the battery is not charging" in caplog.text
+
+
+def test_start_up_check_only_runs_once(monitor, mock_ina):
+    """The start up check is for the first reading only."""
+    with (
+        patch.object(monitor, "_update"),
+        patch.object(monitor, "_check_start_up_charge") as check,
+    ):
+        _run_monitor_with_ina(monitor, mock_ina)
+        _run_monitor_with_ina(monitor, mock_ina)
+
+    check.assert_called_once()
+
+
+def test_start_up_above_shutdown_level_logs_nothing(monitor, mock_ina, caplog):
+    """A normal start does not log a start up warning."""
+    with patch.object(monitor, "_update"), caplog.at_level("INFO", "Red Reactor"):
+        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
+
+    assert "Started at" not in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Battery runtime limit
+# ---------------------------------------------------------------------------
+
+
+def test_runtime_limit_disabled_by_default(monitor, mock_ina):
+    """With the default limit of 0, time on battery never shuts down."""
+    shutdown_called = _shutdown_events(monitor)
+
+    with (
+        patch.object(monitor, "_update"),
+        patch("redreactor.components.monitor.monitor.time.monotonic") as monotonic,
+    ):
+        monotonic.return_value = 0
+        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
+        monotonic.return_value = 24 * 60 * 60
+        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
+
+    assert not shutdown_called
+
+
+def test_runtime_limit_shuts_down_after_limit(monitor, mock_ina, dynamic_config):
+    """On battery for longer than the limit, it shuts down at any charge."""
+    dynamic_config.data["battery_runtime_limit"] = 10
+    shutdown_called = _shutdown_events(monitor)
+
+    with (
+        patch.object(monitor, "_update"),
+        patch("redreactor.components.monitor.monitor.time.monotonic") as monotonic,
+    ):
+        monotonic.return_value = 1000
+        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
+        monotonic.return_value = 1000 + 9 * 60
+        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
+        assert not shutdown_called
+
+        monotonic.return_value = 1000 + 10 * 60
+        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
+
+    assert shutdown_called
+
+
+def test_runtime_limit_resets_when_power_returns(monitor, mock_ina, dynamic_config):
+    """External power returning restarts the runtime count."""
+    dynamic_config.data["battery_runtime_limit"] = 10
+    shutdown_called = _shutdown_events(monitor)
+
+    with (
+        patch.object(monitor, "_update"),
+        patch("redreactor.components.monitor.monitor.time.monotonic") as monotonic,
+    ):
+        monotonic.return_value = 0
+        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
+        monotonic.return_value = 9 * 60
+        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, -50.0)
+        monotonic.return_value = 10 * 60
+        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
+        monotonic.return_value = 15 * 60
+        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
+
+    assert not shutdown_called
+
+
+# ---------------------------------------------------------------------------
+# Published state and INA219 setup
+# ---------------------------------------------------------------------------
+
+
+def test_state_payload_includes_new_fields(monitor, mock_ina):
+    """Power, charging and the runtime limit are published."""
+    import json
+
+    from redreactor.components.mqtt import MQTT
+
+    published = {}
+    MQTT.event.on(
+        "publish",
+        lambda topic, payload, **_: published.__setitem__(topic, payload),
+    )
+    mock_ina.power.return_value = 1234.0
+    _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, -50.0)
+    monitor._update()
+
+    state = json.loads(published["redreactor/redreactor/state"])
+    assert state["power"] == 1.234
+    assert state["charging"] == "ON"
+    assert state["battery_runtime_limit"] == 0
+
+
+def test_ina_uses_configured_bus(static_config, dynamic_config, mock_ina):
+    """The I2C bus comes from the configuration rather than being fixed."""
+    from redreactor.components.monitor.monitor import Monitor
+
+    static_config["ina"]["bus"] = 3
+    with patch(
+        "redreactor.components.monitor.monitor.INA219",
+        return_value=mock_ina,
+    ) as ina_class:
+        monitor = Monitor(static_config, dynamic_config)
+    monitor.monitor_timer.stop()
+
+    assert ina_class.call_args.kwargs["busnum"] == 3
+
+
+def test_read_once_returns_a_reading(static_config, mock_ina):
+    """`--check` reads the board once without starting the service."""
+    from redreactor.components.monitor import read_once
+
+    mock_ina.voltage.return_value = 4.1
+    mock_ina.current.return_value = -120.0
+    mock_ina.power.return_value = 492.0
+    with patch(
+        "redreactor.components.monitor.monitor.INA219",
+        return_value=mock_ina,
+    ):
+        reading = read_once(static_config)
+
+    assert reading == {
+        "i2c_bus": 1,
+        "i2c_address": "0x40",
+        "voltage": 4.1,
+        "current": -120.0,
+        "power": 0.492,
+        "charging": True,
+    }
+
+
+def test_read_once_exits_when_board_is_missing(static_config):
+    """A missing board exits non-zero so the problem is obvious."""
+    from redreactor.components.monitor import read_once
+
+    with (
+        patch(
+            "redreactor.components.monitor.monitor.INA219",
+            side_effect=OSError("No such device"),
+        ),
+        pytest.raises(SystemExit) as exit_info,
+    ):
+        read_once(static_config)
+
+    assert exit_info.value.code == 1

@@ -78,7 +78,7 @@ class Homeassistant:
                 expire_after=int(static_configuration["homeassistant"]["expire_after"]),
                 entity_category=field.get("entity_category", None),
                 icon=field.get("icon", None),
-                object_id=field.get("object_id", None),
+                default_entity_id=self._default_entity_id(field),
                 unique_id=f"{configuration_defaults.identifiers}_{field['name']}",
                 state_topic=f"{static_configuration['mqtt']['base_topic']}/{static_configuration['hostname']['name']}/{static_configuration['mqtt']['topic']['state']}",
                 configuration_topic=f"{static_configuration['homeassistant']['topic']}/{field['type']}/{configuration_defaults.identifiers}_{field['name']}/config",
@@ -144,6 +144,28 @@ class Homeassistant:
             configured.__dict__ |= configuring.__dict__
 
             self.configuration.append(configured)
+
+    def _default_entity_id(self, field: dict[str, Any]) -> str | None:
+        """Return the entity ID Home Assistant should create the entity with.
+
+        Home Assistant deprecated `object_id` in favour of `default_entity_id`,
+        which takes a full entity ID including the domain. An `object_id` from
+        older configuration files is converted so it keeps working.
+        """
+        if field.get("default_entity_id"):
+            return str(field["default_entity_id"])
+
+        if field.get("object_id"):
+            self.logger.warning(
+                "The `object_id` option of the %s field is deprecated, "
+                "use `default_entity_id: %s.%s` instead",
+                field["name"],
+                field["type"],
+                field["object_id"],
+            )
+            return f"{field['type']}.{field['object_id']}"
+
+        return None
 
     def _update_homeassistant_configuration(self) -> None:
         """Push Home Assistant configuration for auto discovery."""
