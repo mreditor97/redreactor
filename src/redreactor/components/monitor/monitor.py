@@ -106,8 +106,8 @@ class Monitor:
         except (OSError, ModuleNotFoundError):
             self.logger.exception("Unable to connect to the Red Reactor")
 
-            # Exit the program
-            sys.exit(0)
+            # Exit the program, non-zero so a supervisor can retry
+            sys.exit(1)
 
         # Configure the monitor timer, start's as soon as possible
         self.monitor_timer = RepeatTimer(
@@ -146,6 +146,8 @@ class Monitor:
                     event_name="publish",
                     topic=f"{self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['status']}",
                     payload=f"{self._static_configuration['status']['offline']}",
+                    qos=1,
+                    retain=True,
                 )
             except ZeroDivisionError:
                 self.logger.exception(
@@ -208,16 +210,34 @@ class Monitor:
         prevents the level from reaching 100% while the battery is still under
         load (voltage sags slightly even when fully charged).  min/max clamp
         the result to [0, 100] so transient out-of-range readings are safe.
+
+        If the configured minimum is not below the maximum the scale would be
+        inverted and the level could never reach 0%, so low battery shutdown
+        would never happen. In that case the default voltages are used instead.
         """
+        voltage_minimum = self.data.battery_voltage_minimum
+        voltage_maximum = self.data.battery_voltage_maximum
+        if voltage_maximum - DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP <= voltage_minimum:
+            self.logger.error(
+                "Battery voltage minimum %fV is not below maximum %fV, "
+                "using the default %fV to %fV instead",
+                voltage_minimum,
+                voltage_maximum,
+                DEFAULT_BATTERY_VOLTAGE_MINIMUM,
+                DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
+            )
+            voltage_minimum = DEFAULT_BATTERY_VOLTAGE_MINIMUM
+            voltage_maximum = DEFAULT_BATTERY_VOLTAGE_MAXIMUM
+
         return int(
             max(
                 min(
                     100,
-                    (voltage - self.data.battery_voltage_minimum)
+                    (voltage - voltage_minimum)
                     / (
-                        self.data.battery_voltage_maximum
+                        voltage_maximum
                         - DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP
-                        - self.data.battery_voltage_minimum
+                        - voltage_minimum
                     )
                     * 100,
                 ),
@@ -260,6 +280,8 @@ class Monitor:
             event_name="publish",
             topic=f"{self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['status']}",
             payload=f"{self._static_configuration['status']['online']}",
+            qos=1,
+            retain=True,
         )
 
         # Publish latest data to state endpoint

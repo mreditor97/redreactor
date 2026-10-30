@@ -7,14 +7,16 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import shlex
 import subprocess
-import sys
+import threading
 import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal
 
 from redreactor.components.mqtt import MQTT
+from redreactor.const import DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP
 from redreactor.helpers.emitter import EventEmitter
 
 if TYPE_CHECKING:
@@ -121,7 +123,14 @@ class Commander:
                     "%s button has been pressed",
                     self._static_configuration["fields"][field]["pretty"],
                 )
-                self._on_command(event_type=field)
+                # Run off the MQTT network thread: publishes made from inside a
+                # paho callback are only queued, and sleeping here would block
+                # the loop that has to deliver the offline status.
+                threading.Thread(
+                    target=self._on_command,
+                    kwargs={"event_type": field},
+                    name=f"redreactor-{field}",
+                ).start()
                 return
 
             # If the received command is of type number
@@ -136,6 +145,9 @@ class Commander:
                     command,
                 )
 
+                if not self._is_valid_number(field, command):
+                    return
+
                 # Update Dynamic configuration with latest value
                 self._dynamic_configuration.data[field] = command
 
@@ -145,6 +157,71 @@ class Commander:
 
         # If it gets to here, the received command is invalid
         self.logger.warning("Command received on %s is invalid", topic)
+
+    def _is_valid_number(self, field: str, value: Any) -> bool:
+        """Check a received number command before it is persisted.
+
+        Values are written to the dynamic configuration file and read back with
+        int()/float() on every monitor tick, so anything that is not a finite
+        number inside the field's range would break the service on every start.
+        """
+        field_configuration = self._static_configuration["fields"][field]
+
+        # bool is a subclass of int, but `true` is never a meaningful setting
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int | float)
+            or not math.isfinite(value)
+        ):
+            self.logger.warning(
+                "Ignoring %s update, %r is not a number",
+                field_configuration["pretty"],
+                value,
+            )
+            return False
+
+        minimum = field_configuration.get("min")
+        maximum = field_configuration.get("max")
+        if (minimum is not None and value < minimum) or (
+            maximum is not None and value > maximum
+        ):
+            self.logger.warning(
+                "Ignoring %s update, %s is outside the range %s to %s",
+                field_configuration["pretty"],
+                value,
+                minimum,
+                maximum,
+            )
+            return False
+
+        # The battery level is scaled between the two voltages, so an inverted
+        # pair would stop the battery from ever reading 0% (and shutting down).
+        if field in {"battery_voltage_minimum", "battery_voltage_maximum"}:
+            voltage_minimum = float(
+                value
+                if field == "battery_voltage_minimum"
+                else self._dynamic_configuration.data["battery_voltage_minimum"],
+            )
+            voltage_maximum = float(
+                value
+                if field == "battery_voltage_maximum"
+                else self._dynamic_configuration.data["battery_voltage_maximum"],
+            )
+            if (
+                voltage_minimum
+                >= voltage_maximum - DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP
+            ):
+                self.logger.warning(
+                    "Ignoring %s update, battery voltage minimum (%sV) must be "
+                    "below the maximum (%sV) by more than %sV",
+                    field_configuration["pretty"],
+                    voltage_minimum,
+                    voltage_maximum,
+                    DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
+                )
+                return False
+
+        return True
 
     def _on_command(self, event_type: Literal["shutdown", "restart"]) -> None:
         """Commander's on command event.
@@ -167,6 +244,8 @@ class Commander:
             event_name="publish",
             topic=f"{self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['status']}",
             payload=f"{self._static_configuration['status']['offline']}",
+            qos=1,
+            retain=True,
         )
 
         # Give the broker time to deliver the offline status before the TCP
@@ -178,8 +257,10 @@ class Commander:
         cmd = shlex.split(self._static_configuration["system"][event_type])
         subprocess.run(cmd, check=False)  # noqa: S603
 
-        # Exit the program
-        sys.exit(0)
+        # This runs on a worker or timer thread, where sys.exit() would only end
+        # that thread. Disconnecting makes loop_forever() return in the main
+        # thread, which then exits the program.
+        MQTT.event.emit(event_name="disconnect")
 
     def _shutdown(self) -> None:
         """Shutdown event hook."""

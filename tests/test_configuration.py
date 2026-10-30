@@ -112,3 +112,38 @@ def test_linked_config_creates_dynamic_configuration(tmp_path):
 
     assert isinstance(linked.dynamic, DynamicConfiguration)
     assert linked.dynamic.data["report_interval"] == DEFAULT_REPORT_INTERVAL
+
+
+def test_dynamic_config_replaces_invalid_values_with_defaults(tmp_path):
+    """Non-numeric values saved by older versions don't stop the service starting."""
+    dynamic_file = tmp_path / "dynamic.json"
+    dynamic_file.write_text(
+        json.dumps(
+            {
+                "report_interval": "abc",
+                "battery_warning_threshold": None,
+                "battery_voltage_minimum": True,
+                "battery_voltage_maximum": 4.1,
+            },
+        ),
+    )
+
+    config = DynamicConfiguration(dynamic_file=str(dynamic_file))
+
+    assert config.data["report_interval"] == DEFAULT_REPORT_INTERVAL
+    assert config.data["battery_warning_threshold"] == DEFAULT_BATTERY_WARNING_THRESHOLD
+    assert config.data["battery_voltage_minimum"] == DEFAULT_BATTERY_VOLTAGE_MINIMUM
+    assert config.data["battery_voltage_maximum"] == 4.1
+
+
+def test_dynamic_config_resets_inverted_voltage_range(tmp_path):
+    """A saved minimum voltage above the maximum is reset to the defaults."""
+    dynamic_file = tmp_path / "dynamic.json"
+    dynamic_file.write_text(
+        json.dumps({"battery_voltage_minimum": 4.5, "battery_voltage_maximum": 4.2}),
+    )
+
+    config = DynamicConfiguration(dynamic_file=str(dynamic_file))
+
+    assert config.data["battery_voltage_minimum"] == DEFAULT_BATTERY_VOLTAGE_MINIMUM
+    assert config.data["battery_voltage_maximum"] == DEFAULT_BATTERY_VOLTAGE_MAXIMUM
