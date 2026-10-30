@@ -188,19 +188,17 @@ class Monitor:
                 # A negative current means the battery is being charged
                 self.data.charging = self.data.current < 0
             except DeviceRangeError:
+                # The current is above what the INA219 can measure. The device
+                # is still running, so stay online and publish straight away,
+                # reporting the current as the configured maximum.
                 # Assume no external power so the device will still shutdown on a low voltage reading # noqa: E501
                 self.logger.exception("Battery current range error")
                 self.data.external_power = False
                 self.data.charging = False
-                self.data.current = 6000
-
-                MQTT.event.emit(
-                    event_name="publish",
-                    topic=f"{self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['status']}",
-                    payload=f"{self._static_configuration['status']['offline']}",
-                    qos=1,
-                    retain=True,
+                self.data.current = (
+                    float(self._static_configuration["ina"]["max_expected_amps"]) * 1000
                 )
+                self._update()
             except ZeroDivisionError:
                 self.logger.exception(
                     "Minimum Voltage %fV and Maximum Voltage %fV difference is equal to 0",  # noqa: E501

@@ -169,20 +169,39 @@ def test_monitor_negative_current_sets_external_power_true(monitor, mock_ina):
 
 
 def test_monitor_device_range_error_sets_external_power_false(monitor, mock_ina):
-    """DeviceRangeError sets external_power=False and current=6000."""
+    """DeviceRangeError sets external_power=False and current to the INA maximum."""
     from ina219 import DeviceRangeError
 
     monitor.data.external_power = True
     mock_ina.voltage.side_effect = DeviceRangeError(6000)
 
-    from redreactor.components.mqtt import MQTT
-
-    MQTT.event = EventEmitter()
-
-    monitor._monitor(ina=mock_ina)
+    with patch.object(monitor, "_update"):
+        monitor._monitor(ina=mock_ina)
 
     assert monitor.data.external_power is False
-    assert monitor.data.current == 6000
+    assert monitor.data.current == 5500  # max_expected_amps 5.5 A, in mA
+
+
+def test_monitor_device_range_error_stays_online(monitor, mock_ina):
+    """An overcurrent reading publishes state immediately and never `offline`."""
+    from ina219 import DeviceRangeError
+
+    from redreactor.components.mqtt import MQTT
+
+    published: list[tuple[str, str]] = []
+    MQTT.event.on(
+        "publish",
+        lambda topic, payload, **_: published.append((topic, payload)),
+    )
+    mock_ina.current.side_effect = DeviceRangeError(6000)
+
+    with patch.object(monitor, "_update_cpu_information"):
+        monitor._monitor(ina=mock_ina)
+
+    status = [payload for topic, payload in published if topic.endswith("/status")]
+    assert status
+    assert "offline" not in status
+    assert any(topic.endswith("/state") for topic, _ in published)
 
 
 def test_monitor_battery_zero_no_external_power_emits_shutdown(monitor, mock_ina):
