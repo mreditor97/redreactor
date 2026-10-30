@@ -13,7 +13,7 @@ readme = { file = "README.md", content-type = "text/markdown" }
 packages = [
   { include = "redreactor", from = "src"},
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
   "pi-ina219 >= 1.4.1",
   "paho-mqtt >= 2.0.0",
@@ -59,7 +59,7 @@ show_missing = true
 # free to run mypy on Windows, Linux, or macOS and get consistent
 # results.
 platform = "linux"
-python_version = "3.10"
+python_version = "3.11"
 
 # show error messages from unrelated files
 follow_imports = "normal"
