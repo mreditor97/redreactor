@@ -234,6 +234,24 @@ def test_on_message_invalid_json_logs_warning(commander, static_config):
     mock_warn.assert_called_once()
 
 
+def test_on_message_non_utf8_payload_logs_warning(commander, static_config):
+    """A payload that isn't UTF-8 is logged, not raised into the MQTT loop."""
+    cmd, _ = commander
+    base = static_config["mqtt"]["base_topic"]
+    host = static_config["hostname"]["name"]
+    set_topic = static_config["mqtt"]["topic"]["set"]
+    before = dict(cmd._dynamic_configuration.data)
+
+    msg = _make_mock_message(f"{base}/{host}/{set_topic}/report_interval", "")
+    msg.payload = b"\xff\xfe"
+
+    with patch.object(cmd.logger, "warning") as mock_warn:
+        cmd._on_message(None, None, msg)
+
+    mock_warn.assert_called_once()
+    assert cmd._dynamic_configuration.data == before
+
+
 # ---------------------------------------------------------------------------
 # _on_message --- unknown topic
 # ---------------------------------------------------------------------------

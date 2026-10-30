@@ -256,7 +256,7 @@ class MQTT:
         self.logger.debug(
             "Message received: %s - %s",
             str(message.topic),
-            str(message.payload.decode("utf-8")),
+            message.payload.decode("utf-8", errors="replace"),
         )
 
         self.event.emit(

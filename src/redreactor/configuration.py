@@ -5,6 +5,7 @@ Contains the ability to read the static and dynamic configuration files.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import math
@@ -31,6 +32,213 @@ from redreactor.helpers.emitter import EventEmitter
 from redreactor.helpers.utils import dict_merge
 
 logger = logging.getLogger("Red Reactor")
+
+# Valid 7-bit I2C addresses, 0x00-0x02 and 0x78-0x7F are reserved
+I2C_ADDRESS_MINIMUM = 0x03
+I2C_ADDRESS_MAXIMUM = 0x77
+PORT_MAXIMUM = 65535
+
+
+class ConfigurationError(ValueError):
+    """Raised when the static configuration file contains invalid values."""
+
+
+def _is_number(value: Any) -> bool:
+    """Check for a finite int or float, bool is a subclass of int so is excluded."""
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, int | float)
+        and math.isfinite(value)
+    )
+
+
+def _convert_quoted_values(configuration: dict[str, Any]) -> None:
+    """Convert quoted numbers and booleans in place.
+
+    Quoted values ("1883", "true") worked in earlier versions, so they are
+    converted rather than refused at start.
+    """
+    for section, key in (
+        ("mqtt", "port"),
+        ("mqtt", "version"),
+        ("mqtt", "timeout"),
+        ("homeassistant", "discovery_interval"),
+        ("homeassistant", "expire_after"),
+        ("ina", "monitor_interval"),
+        ("ina", "shunt_ohms"),
+        ("ina", "max_expected_amps"),
+        ("ina", "bus"),
+    ):
+        value = configuration[section][key]
+        if isinstance(value, str):
+            try:
+                configuration[section][key] = int(value)
+            except ValueError:
+                with contextlib.suppress(ValueError):
+                    configuration[section][key] = float(value)
+    for section, key in (("mqtt", "exit_on_fail"), ("homeassistant", "discovery")):
+        value = configuration[section][key]
+        if isinstance(value, str) and value.lower() in {"true", "false"}:
+            configuration[section][key] = value.lower() == "true"
+    tls = configuration["mqtt"].get("tls")
+    if isinstance(tls, dict):
+        for key in ("enabled", "insecure"):
+            value = tls.get(key)
+            if isinstance(value, str) and value.lower() in {"true", "false"}:
+                tls[key] = value.lower() == "true"
+
+
+def _validate_static(configuration: dict[str, Any]) -> list[str]:
+    """Check the types and ranges of the merged static configuration.
+
+    Returns a list of problems, empty when the configuration is valid. Values
+    are checked up front so a typo fails at start with a clear message, rather
+    than as a crash on a timer thread or a silently wrong setting later.
+    """
+    sections = (
+        "mqtt",
+        "hostname",
+        "homeassistant",
+        "status",
+        "fields",
+        "ina",
+        "system",
+        "logging",
+    )
+    errors = [
+        f"`{section}` must be a mapping, got {configuration.get(section)!r}"
+        for section in sections
+        if not isinstance(configuration.get(section), dict)
+    ]
+    if not errors and not isinstance(configuration["mqtt"].get("topic"), dict):
+        errors.append("`mqtt.topic` must be a mapping")
+    if not errors and not isinstance(configuration["mqtt"].get("tls"), dict):
+        errors.append(
+            f"`mqtt.tls` must be a mapping, got {configuration['mqtt'].get('tls')!r}",
+        )
+    if errors:
+        # The remaining checks index into these sections
+        return errors
+
+    def check(path: str, valid: bool, requirement: str) -> None:  # noqa: FBT001
+        if not valid:
+            section, _, key = path.rpartition(".")
+            value = configuration
+            for part in section.split("."):
+                value = value[part]
+            errors.append(f"`{path}` {requirement}, got {value[key]!r}")
+
+    _convert_quoted_values(configuration)
+
+    mqtt = configuration["mqtt"]
+    homeassistant = configuration["homeassistant"]
+    ina = configuration["ina"]
+
+    # Booleans, bool() of any other text is True so it would be misread
+    check(
+        "mqtt.exit_on_fail",
+        isinstance(mqtt["exit_on_fail"], bool),
+        "must be true or false",
+    )
+    check(
+        "homeassistant.discovery",
+        isinstance(homeassistant["discovery"], bool),
+        "must be true or false",
+    )
+
+    # Whole numbers
+    check(
+        "mqtt.port",
+        _is_number(mqtt["port"])
+        and float(mqtt["port"]).is_integer()
+        and 1 <= mqtt["port"] <= PORT_MAXIMUM,
+        f"must be a whole number from 1 to {PORT_MAXIMUM}",
+    )
+    check("mqtt.version", mqtt["version"] in {3, 5}, "must be 3 or 5")
+    check(
+        "mqtt.timeout",
+        _is_number(mqtt["timeout"]) and mqtt["timeout"] >= 0,
+        "must be a number of seconds, 0 or more",
+    )
+    check(
+        "ina.address",
+        not isinstance(ina["address"], bool)
+        and isinstance(ina["address"], int)
+        and I2C_ADDRESS_MINIMUM <= ina["address"] <= I2C_ADDRESS_MAXIMUM,
+        f"must be an I2C address from {I2C_ADDRESS_MINIMUM:#04x} "
+        f"to {I2C_ADDRESS_MAXIMUM:#04x}",
+    )
+
+    check(
+        "ina.bus",
+        not isinstance(ina["bus"], bool)
+        and isinstance(ina["bus"], int)
+        and ina["bus"] >= 0,
+        "must be an I2C bus number, 0 or more",
+    )
+
+    errors.extend(_validate_tls(mqtt["tls"]))
+
+    # Positive numbers, a zero interval would spin a timer thread
+    for path, value in (
+        ("homeassistant.discovery_interval", homeassistant["discovery_interval"]),
+        ("ina.monitor_interval", ina["monitor_interval"]),
+        ("ina.shunt_ohms", ina["shunt_ohms"]),
+        ("ina.max_expected_amps", ina["max_expected_amps"]),
+    ):
+        check(path, _is_number(value) and value > 0, "must be a number above 0")
+    check(
+        "homeassistant.expire_after",
+        _is_number(homeassistant["expire_after"])
+        and homeassistant["expire_after"] >= 0,
+        "must be a number of seconds, 0 or more",
+    )
+
+    # MQTT topic levels, wildcards are not allowed in a published topic and a
+    # `/` in a single level would shift every topic the commands are matched on
+    for path, value, allow_slash in (
+        ("mqtt.base_topic", mqtt["base_topic"], True),
+        ("homeassistant.topic", homeassistant["topic"], True),
+        ("hostname.name", configuration["hostname"]["name"], False),
+        ("mqtt.topic.state", mqtt["topic"]["state"], False),
+        ("mqtt.topic.status", mqtt["topic"]["status"], False),
+        ("mqtt.topic.set", mqtt["topic"]["set"], False),
+    ):
+        forbidden = "+#" if allow_slash else "+#/"
+        check(
+            path,
+            isinstance(value, str)
+            and value != ""
+            and not any(character in value for character in forbidden),
+            f"must be text without {' or '.join(forbidden)}",
+        )
+
+    for path, value in (
+        ("system.shutdown", configuration["system"]["shutdown"]),
+        ("system.restart", configuration["system"]["restart"]),
+    ):
+        check(path, isinstance(value, str) and value.strip() != "", "must be a command")
+
+    return errors
+
+
+def _validate_tls(tls: dict[str, Any]) -> list[str]:
+    """Check the MQTT TLS options.
+
+    The certificate paths themselves are checked by paho when the connection is
+    set up, which stops the service if a file can't be read.
+    """
+    errors = [
+        f"`mqtt.tls.{key}` must be true or false, got {tls[key]!r}"
+        for key in ("enabled", "insecure")
+        if not isinstance(tls[key], bool)
+    ]
+    errors.extend(
+        f"`mqtt.tls.{key}` must be a file path, got {tls[key]!r}"
+        for key in ("ca_certs", "certfile", "keyfile")
+        if tls[key] is not None and not isinstance(tls[key], str)
+    )
+    return errors
 
 
 class DynamicConfiguration:
@@ -68,21 +276,37 @@ class DynamicConfiguration:
             with dynamic_path.open("w") as file:
                 json.dump(dynamic_file_defaults, file)
 
-        with dynamic_path.open() as file:
-            dynamic_file_override = json.load(file)
+        try:
+            with dynamic_path.open() as file:
+                dynamic_file_override = json.load(file)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            logger.warning(
+                "Unable to read %s, using the default settings",
+                self._dynamic_file,
+            )
+            dynamic_file_override = {}
+
+        if not isinstance(dynamic_file_override, dict):
+            logger.warning(
+                "%s does not contain a JSON object, using the default settings",
+                self._dynamic_file,
+            )
+            dynamic_file_override = {}
 
         # Simple dict unpack is fine here — the dynamic config is flat (no
         # nested dicts), so override values win without recursive merging.
         data = {**dynamic_file_defaults, **dynamic_file_override}
 
         # Older versions stored received values without checking them, so a
-        # non-numeric value would stop the service from ever starting again.
+        # non-numeric value would stop the service from ever starting again. A
+        # report interval of 0 or less would spin the report timer, and a
+        # negative runtime limit is meaningless.
         for key, default in dynamic_file_defaults.items():
             value = data[key]
             if (
-                isinstance(value, bool)
-                or not isinstance(value, int | float)
-                or not math.isfinite(value)
+                not _is_number(value)
+                or (key == "report_interval" and value <= 0)
+                or (key == "battery_runtime_limit" and value < 0)
             ):
                 logger.warning(
                     "Invalid %s value %r in %s, using the default %s",
@@ -148,7 +372,12 @@ class LinkedConfiguration:
     def _load(self) -> dict[str, Any]:
         """Load static configuration file, and override defaults."""
         with Path(self._static_file).open() as static_file:
-            static_file_override = yaml.safe_load(static_file)
+            # An empty file loads as None
+            static_file_override = yaml.safe_load(static_file) or {}
+
+        if not isinstance(static_file_override, dict):
+            msg = f"{self._static_file} must contain a mapping of options"
+            raise ConfigurationError(msg)
 
         static_file_defaults: dict[str, Any] = {
             "mqtt": {
@@ -347,10 +576,18 @@ class LinkedConfiguration:
         # Overwritten any different values with the ones that came from the static file
         dict_merge(static_file_defaults, static_file_override)
 
+        errors = _validate_static(static_file_defaults)
+        if errors:
+            msg = f"Invalid configuration in {self._static_file}: " + "; ".join(
+                errors,
+            )
+            raise ConfigurationError(msg)
+
         # MQTT brokers disconnect a client when another connects with the same
         # ID, so default to one that is unique per configured hostname
         static_file_defaults["mqtt"].setdefault(
             "client_id",
             f"redreactor-{static_file_defaults['hostname']['name']}",
         )
+
         return static_file_defaults
