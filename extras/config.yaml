@@ -9,7 +9,7 @@ mqtt:
   password: testing # MQTT Broker password
   version: 5 # MQTT Version 5 or 3
 
-  client_id: Red Reactor # Connection Client ID - Defaults to Red Reactor
+  # client_id: Red Reactor # Connection Client ID - Defaults to redreactor-<hostname name>, must be unique per broker
 
   base_topic: redreactor # Red Reactor base publish topic
   topic:

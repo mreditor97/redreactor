@@ -5,6 +5,9 @@ DEFAULT_EXPIRE_INTERVAL = 120  # Seconds before Home Assistant invalidates recei
 DEFAULT_BATTERY_WARNING_THRESHOLD = 10  # Percentage of charge remaining
 DEFAULT_BATTERY_VOLTAGE_MINIMUM = 2.9  # Minimum battery voltage before shutting down
 DEFAULT_BATTERY_VOLTAGE_MAXIMUM = 4.2  # Maximum battery voltage (fully charged)
+# Consecutive 0% readings needed before shutting down, so a brief voltage sag
+# under load doesn't power the device off
+DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS = 3
 # Subtracting this drop from the maximum avoids reporting 100% under load, where
 # voltage sags slightly even when the battery is full.
 DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP = 0.03
