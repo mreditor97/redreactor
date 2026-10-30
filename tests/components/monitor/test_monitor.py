@@ -257,3 +257,31 @@ def test_monitor_single_empty_reading_does_not_shut_down(monitor, mock_ina):
         monitor._monitor(ina=mock_ina)
 
     assert not shutdown_called
+
+
+def test_monitor_voltage_above_max_publishes_only_on_transition(monitor, mock_ina):
+    """High voltage with external power already detected does not republish."""
+    monitor.data.external_power = True
+    mock_ina.voltage.return_value = DEFAULT_BATTERY_VOLTAGE_MAXIMUM + 0.10
+    mock_ina.current.return_value = 5.0  # Float charge, power already present
+
+    with patch.object(monitor, "_update") as update:
+        monitor._monitor(ina=mock_ina)
+        monitor._monitor(ina=mock_ina)
+
+    update.assert_not_called()
+    assert monitor.data.external_power is True
+
+
+def test_monitor_reads_dynamic_configuration_by_field_key(
+    static_config,
+    dynamic_config,
+    mock_ina,
+):
+    """Renaming a field's MQTT name doesn't change where its value is stored."""
+    static_config["fields"]["report_interval"]["name"] = "interval_seconds"
+    dynamic_config.data["report_interval"] = 60
+
+    monitor = _make_monitor(static_config, dynamic_config, mock_ina)
+
+    assert monitor.data.report_interval == 60

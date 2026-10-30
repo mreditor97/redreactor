@@ -83,3 +83,21 @@ def test_other_messages_do_not_republish_discovery(homeassistant, topic, payload
         homeassistant._mqtt_on_message(None, None, _message(topic, payload))
 
     update.assert_not_called()
+
+
+def test_device_sw_version_is_package_version(homeassistant):
+    """Discovery reports the installed redreactor version."""
+    from importlib.metadata import version
+
+    assert homeassistant.configuration[0].device.sw_version == version("redreactor")
+
+
+def test_configuration_is_not_shared_between_instances(static_config, dynamic_config):
+    """Each instance builds its own discovery list instead of appending to one."""
+    from redreactor.components.homeassistant import Homeassistant
+
+    first = Homeassistant(static_config, dynamic_config)
+    second = Homeassistant(static_config, dynamic_config)
+
+    assert len(first.configuration) == len(static_config["fields"])
+    assert len(second.configuration) == len(static_config["fields"])
