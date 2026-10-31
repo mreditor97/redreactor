@@ -21,7 +21,6 @@ from redreactor.const import (
     DEFAULT_BATTERY_AVERAGE_READINGS,
     DEFAULT_BATTERY_CAPACITY,
     DEFAULT_BATTERY_INTERNAL_RESISTANCE,
-    DEFAULT_BATTERY_RUNTIME_LIMIT,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
     DEFAULT_BATTERY_VOLTAGE_MINIMUM,
@@ -325,7 +324,6 @@ class DynamicConfiguration:
             "battery_warning_threshold": DEFAULT_BATTERY_WARNING_THRESHOLD,
             "battery_voltage_minimum": DEFAULT_BATTERY_VOLTAGE_MINIMUM,
             "battery_voltage_maximum": DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
-            "battery_runtime_limit": DEFAULT_BATTERY_RUNTIME_LIMIT,
             "battery_capacity": DEFAULT_BATTERY_CAPACITY,
         }
 
@@ -358,13 +356,12 @@ class DynamicConfiguration:
         # Older versions stored received values without checking them, so a
         # non-numeric value would stop the service from ever starting again. A
         # report interval of 0 or less would spin the report timer, and a
-        # negative runtime limit or capacity is meaningless.
+        # negative capacity is meaningless.
         for key, default in dynamic_file_defaults.items():
             value = data[key]
             if (
                 not _is_number(value)
                 or (key == "report_interval" and value <= 0)
-                or (key == "battery_runtime_limit" and value < 0)
                 or (key == "battery_capacity" and value < 0)
             ):
                 logger.warning(
@@ -589,18 +586,6 @@ class LinkedConfiguration:
                     "max": 300,
                     "mode": "box",
                     "step": 5,
-                },
-                "battery_runtime_limit": {
-                    "name": "battery_runtime_limit",
-                    "pretty": "Battery runtime limit",
-                    "type": "number",
-                    "unit": "min",
-                    "device_class": "duration",
-                    "entity_category": "diagnostic",
-                    "min": 0,
-                    "max": 1440,
-                    "mode": "box",
-                    "step": 1,
                 },
                 "battery_capacity": {
                     "name": "battery_capacity",

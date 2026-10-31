@@ -290,18 +290,6 @@ def test_linked_config_converts_quoted_values(tmp_path):
     assert config.static["ina"]["shunt_ohms"] == 0.1
 
 
-def test_dynamic_config_defaults_battery_runtime_limit_to_off(tmp_path):
-    """Older dynamic files without the runtime limit get it switched off."""
-    dynamic_file = tmp_path / "dynamic.json"
-    dynamic_file.write_text(json.dumps({"report_interval": 60}))
-
-    config = DynamicConfiguration(dynamic_file=str(dynamic_file))
-
-    assert config.data["battery_runtime_limit"] == 0
-    assert config.data["battery_capacity"] == 0
-    assert config.data["report_interval"] == 60
-
-
 def test_linked_config_new_defaults(tmp_path):
     """New options have defaults, so existing config files keep working."""
     static_file = tmp_path / "config.yaml"
@@ -313,7 +301,6 @@ def test_linked_config_new_defaults(tmp_path):
     assert config.static["mqtt"]["tls"]["enabled"] is False
     assert config.static["fields"]["power"]["unit"] == "W"
     assert config.static["fields"]["charging"]["type"] == "binary_sensor"
-    assert config.static["fields"]["battery_runtime_limit"]["type"] == "number"
     assert config.static["fields"]["battery_capacity"]["unit"] == "mAh"
     assert config.static["fields"]["battery_time_remaining"]["type"] == "sensor"
     assert config.static["fields"]["cpu_stat_raw"]["state_class"] is None
@@ -388,16 +375,6 @@ def test_linked_config_rejects_invalid_new_options(tmp_path, contents, message):
 
     with pytest.raises(ConfigurationError, match=message.replace(".", r"\.")):
         LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
-
-
-def test_dynamic_config_resets_negative_runtime_limit(tmp_path):
-    """A negative runtime limit in the dynamic file falls back to off."""
-    dynamic_file = tmp_path / "dynamic.json"
-    dynamic_file.write_text(json.dumps({"battery_runtime_limit": -5}))
-
-    config = DynamicConfiguration(dynamic_file=str(dynamic_file))
-
-    assert config.data["battery_runtime_limit"] == 0
 
 
 def test_dynamic_config_resets_negative_battery_capacity(tmp_path):

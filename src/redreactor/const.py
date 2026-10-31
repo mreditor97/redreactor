@@ -14,8 +14,6 @@ DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP = 0.03
 # Voltage more than this above the configured maximum indicates external power
 # is connected. The headroom avoids false positives from measurement noise.
 DEFAULT_BATTERY_VOLTAGE_HEADROOM = 0.05
-# Minutes on battery before shutting down regardless of charge, 0 disables it
-DEFAULT_BATTERY_RUNTIME_LIMIT = 0
 # Battery capacity in mAh, used to estimate the time remaining, 0 means not set
 DEFAULT_BATTERY_CAPACITY = 0
 # Battery internal resistance in milliohms, used to correct the voltage for the

@@ -7,7 +7,7 @@ This is a Red Reactor MQTT Client service that is designed to run as a backgroun
 Functionality includes:
 
 - Background application that continuously monitors the battery status, and will safely shutdown if required
-- Configurable shutdown level, and an optional limit on how long to run on battery
+- Configurable battery shutdown level
 - The configuration file can be used to override specific topics and entities
 - Connects to a MQTT broker, and publishes the service status, data and enables command topics
 - Published data includes:
@@ -23,14 +23,12 @@ Functionality includes:
   - Battery Warning Threshold
   - Battery Voltage Minimum and Maximum
   - Report Interval
-  - Battery Runtime Limit
 - Commands:
   - Immediate Shutdown
   - Immediate Restart
   - Change the Battery Warning Threshold
   - Change the Battery Voltage Minimum and Maximum
   - Change the Report Interval
-  - Change the Battery Runtime Limit
 - Optional TLS for the MQTT connection
 - A `--check` option that reads the Red Reactor once and exits, to test the I2C setup
 - Provides `systemd` service example, so it can be started as a service on system boot
@@ -64,7 +62,6 @@ Topic `redreactor/your-configured-hostname/state`
   "battery_voltage_minimum": 2.6,
   "battery_voltage_maximum": 4.2,
   "report_interval": 30,
-  "battery_runtime_limit": 0,
   "battery_capacity": 3000,
   "battery_time_remaining": null
 }
@@ -85,7 +82,6 @@ Topic `redreactor/your-configured-hostname/state`
 - `battery_voltage_minimum` is the voltage at which is to be considered the lowest allowable before initiating a safe shutdown
 - `battery_voltage_maximum` is the voltage at which is to be considered the maximum at which the battery can be (this is used in the calculation of the `battery_level`)
 - `report_interval` is the reporting interval at which the data will be published onto the **state** topic
-- `battery_runtime_limit` is the number of minutes to run on battery before a safe shutdown, whatever the charge. `0` turns it off
 - `battery_capacity` is the total capacity of the batteries in mAh (with two cells in parallel, the sum of both), set it from Home Assistant or the command topic. `0` means not set
 - `battery_time_remaining` is a rough estimate of the minutes left on battery before the low battery shutdown, from `battery_capacity`, `battery_level` above `battery_warning_threshold` and `current`. It is `null` (unknown in Home Assistant) while there is external power or `battery_capacity` is `0`. The battery level is worked out from the voltage, which isn't linear with the charge left, so treat it as a guide
 
@@ -105,7 +101,6 @@ Command topic | value:
 - `battery_voltage_minimum` | value (float)
 - `battery_voltage_maximum` | value (float)
 - `report_interval` | value (int)
-- `battery_runtime_limit` | value (int, minutes, `0` to turn off)
 - `battery_capacity` | value (int, mAh, `0` to `20000`, `0` for not set)
 - `restart` | no value required
 - `shutdown` | no value required

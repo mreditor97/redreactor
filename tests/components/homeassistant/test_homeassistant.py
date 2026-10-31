@@ -135,19 +135,6 @@ def test_discovery_includes_power_and_charging(homeassistant):
     assert charging["value_template"] == "{{ value_json.charging }}"
 
 
-def test_discovery_includes_battery_runtime_limit(homeassistant):
-    """The runtime limit is a number entity in minutes with a command topic."""
-    published = _discovery_payloads(homeassistant)
-
-    limit = published[
-        "homeassistant/number/redreactor_redreactor_battery_runtime_limit/config"
-    ]
-    assert limit["command_topic"] == "redreactor/redreactor/set/battery_runtime_limit"
-    assert limit["unit_of_measurement"] == "min"
-    assert limit["device_class"] == "duration"
-    assert (limit["min"], limit["max"], limit["step"]) == (0, 1440, 1)
-
-
 def test_cpu_stat_raw_has_no_state_class(homeassistant):
     """A bitmask should not get long-term statistics."""
     published = _discovery_payloads(homeassistant)
