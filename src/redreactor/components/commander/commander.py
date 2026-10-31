@@ -11,7 +11,7 @@ import shlex
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 from redreactor.components.mqtt import MQTT
@@ -159,7 +159,7 @@ class Commander:
         self.logger.info(
             "Device %s has been called. Last running at %s",
             event_type,
-            datetime.now(tz=timezone.utc).strftime("%H:%M:%S"),
+            datetime.now(tz=UTC).strftime("%H:%M:%S"),
         )
 
         # Publish to MQTT the offline state, before shutting down or restarting
