@@ -368,6 +368,12 @@ def test_linked_config_converts_quoted_new_options(tmp_path):
         ("mqtt: {tls: {enabled: 'maybe'}}", "`mqtt.tls.enabled`"),
         ("mqtt: {tls: {insecure: 1}}", "`mqtt.tls.insecure`"),
         ("mqtt: {tls: {ca_certs: 5}}", "`mqtt.tls.ca_certs`"),
+        ("battery: {curve: [[3.0, 0]]}", "`battery.curve`"),
+        ("battery: {curve: [[3.6, 0], [3.0, 100]]}", "`battery.curve`"),
+        ("battery: {curve: [[3.0, 50], [3.6, 10]]}", "`battery.curve`"),
+        ("battery: {curve: [[3.0, 0], [3.6, 101]]}", "`battery.curve`"),
+        ("battery: {curve: [[3.0, 0], ['3.6', 100]]}", "`battery.curve`"),
+        ("battery: {curve: 3.0}", "`battery.curve`"),
     ],
 )
 def test_linked_config_rejects_invalid_new_options(tmp_path, contents, message):
@@ -397,3 +403,23 @@ def test_dynamic_config_resets_negative_battery_capacity(tmp_path):
     config = DynamicConfiguration(dynamic_file=str(dynamic_file))
 
     assert config.data["battery_capacity"] == 0
+
+
+def test_linked_config_accepts_battery_curve(tmp_path):
+    """A rising voltage curve is accepted, and none is the default."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text("battery: {curve: [[3.0, 0], [3.6, 50], [4.1, 100]]}")
+
+    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+
+    assert config.static["battery"]["curve"][1] == [3.6, 50]
+
+
+def test_dynamic_config_resets_negative_internal_resistance(tmp_path):
+    """A negative internal resistance in the dynamic file falls back to off."""
+    dynamic_file = tmp_path / "dynamic.json"
+    dynamic_file.write_text(json.dumps({"battery_internal_resistance": -5}))
+
+    config = DynamicConfiguration(dynamic_file=str(dynamic_file))
+
+    assert config.data["battery_internal_resistance"] == 0

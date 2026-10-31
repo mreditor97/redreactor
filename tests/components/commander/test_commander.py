@@ -183,6 +183,8 @@ def test_on_message_number_rejects_non_numbers(commander, static_config, payload
         ("battery_runtime_limit", 1441),
         ("battery_capacity", -1),
         ("battery_capacity", 20001),
+        ("battery_internal_resistance", -1),
+        ("battery_internal_resistance", 1001),
     ],
 )
 def test_on_message_number_rejects_out_of_range(commander, static_config, field, value):
@@ -422,3 +424,12 @@ def test_on_message_sets_battery_capacity(commander, static_config):
     _send_number(cmd, static_config, "battery_capacity", "3000")
 
     assert cmd._dynamic_configuration.data["battery_capacity"] == 3000
+
+
+def test_on_message_sets_battery_internal_resistance(commander, static_config):
+    """The battery internal resistance can be changed from Home Assistant."""
+    cmd, _ = commander
+
+    _send_number(cmd, static_config, "battery_internal_resistance", "80")
+
+    assert cmd._dynamic_configuration.data["battery_internal_resistance"] == 80

@@ -6,6 +6,7 @@ import json
 import logging
 import sys
 import time
+from itertools import pairwise
 from typing import TYPE_CHECKING, Any
 
 from ina219 import INA219, DeviceRangeError
@@ -179,10 +180,11 @@ class Monitor:
         if ina:
             try:
                 self.data.voltage = ina.voltage()
+                self.data.current = ina.current()
                 self.data.battery_level = self._calculate_battery_level(
                     self.data.voltage,
+                    self.data.current,
                 )
-                self.data.current = ina.current()
                 # pi-ina219 reports milliwatts, Home Assistant is sent watts
                 self.data.power = ina.power() / 1000
                 # A negative current means the battery is being charged
@@ -197,6 +199,11 @@ class Monitor:
                 self.data.charging = False
                 self.data.current = (
                     float(self._static_configuration["ina"]["max_expected_amps"]) * 1000
+                )
+                # The real current is unknown, so the voltage can't be
+                # corrected for the load
+                self.data.battery_level = self._calculate_battery_level(
+                    self.data.voltage,
                 )
                 self._update()
             except ZeroDivisionError:
@@ -342,8 +349,51 @@ class Monitor:
         )
         return True
 
-    def _calculate_battery_level(self, voltage: float) -> int:
+    def _calculate_battery_level(self, voltage: float, current: float = 0.0) -> int:
         """Calculate Battery Level.
+
+        The battery voltage sags under load by roughly current x internal
+        resistance, so that is added back to estimate the resting voltage.
+        Charging current is negative, so the rise while charging is taken off.
+        A resistance of 0 leaves the voltage as measured.
+
+        The resting voltage is then turned into a level using `battery.curve`
+        when it is configured, as a Li-ion battery's voltage isn't linear with
+        its charge. Otherwise a straight line between the minimum and maximum
+        voltage is used.
+        """
+        resting_voltage = voltage + (
+            current / 1000 * self.data.battery_internal_resistance / 1000
+        )
+
+        curve = self._static_configuration.get("battery", {}).get("curve")
+        if curve:
+            return round(self._interpolate_battery_curve(curve, resting_voltage))
+
+        return self._calculate_linear_battery_level(resting_voltage)
+
+    @staticmethod
+    def _interpolate_battery_curve(curve: list[list[float]], voltage: float) -> float:
+        """Interpolate the battery level between the points of the curve.
+
+        The curve is checked at start up to have rising voltages, so it can be
+        walked in order. Voltages outside it are clamped to its ends.
+        """
+        if voltage <= curve[0][0]:
+            return curve[0][1]
+
+        for lower, upper in pairwise(curve):
+            lower_voltage, lower_level = lower
+            upper_voltage, upper_level = upper
+            if voltage <= upper_voltage:
+                return lower_level + (voltage - lower_voltage) / (
+                    upper_voltage - lower_voltage
+                ) * (upper_level - lower_level)
+
+        return curve[-1][1]
+
+    def _calculate_linear_battery_level(self, voltage: float) -> int:
+        """Calculate the battery level on a straight line between two voltages.
 
         Subtracting DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP from the ceiling
         prevents the level from reaching 100% while the battery is still under
@@ -503,6 +553,7 @@ class Monitor:
                     f"{self._static_configuration['fields']['report_interval']['name']}": self.data.report_interval,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_runtime_limit']['name']}": self.data.battery_runtime_limit,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_capacity']['name']}": self.data.battery_capacity,  # noqa: E501
+                    f"{self._static_configuration['fields']['battery_internal_resistance']['name']}": self.data.battery_internal_resistance,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_time_remaining']['name']}": self.data.battery_time_remaining,  # noqa: E501
                 },
             ),
@@ -543,6 +594,11 @@ class Monitor:
         # Update Battery Capacity
         self.data.battery_capacity = int(
             self._dynamic_configuration.data["battery_capacity"],
+        )
+
+        # Update Battery Internal Resistance
+        self.data.battery_internal_resistance = int(
+            self._dynamic_configuration.data["battery_internal_resistance"],
         )
 
         if self.report_timer:

@@ -219,3 +219,18 @@ def test_discovery_includes_battery_time_remaining(homeassistant):
     assert remaining["unit_of_measurement"] == "min"
     assert remaining["device_class"] == "duration"
     assert remaining["value_template"] == "{{ value_json.battery_time_remaining }}"
+
+
+def test_discovery_includes_battery_internal_resistance(homeassistant):
+    """The internal resistance is a number entity in milliohms."""
+    published = _discovery_payloads(homeassistant)
+
+    resistance = published[
+        "homeassistant/number/redreactor_redreactor_battery_internal_resistance/config"
+    ]
+    assert (
+        resistance["command_topic"]
+        == "redreactor/redreactor/set/battery_internal_resistance"
+    )
+    assert resistance["unit_of_measurement"] == "mΩ"
+    assert (resistance["min"], resistance["max"]) == (0, 1000)
