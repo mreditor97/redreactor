@@ -21,6 +21,10 @@ DEFAULT_BATTERY_CAPACITY = 0
 # Battery internal resistance in milliohms, used to correct the voltage for the
 # sag under load before working out the battery level, 0 turns it off
 DEFAULT_BATTERY_INTERNAL_RESISTANCE = 0.0
+# Monitor readings averaged for the battery level, as brief current spikes make
+# single readings jump. 6 readings at the default 5 second interval is 30 seconds
+DEFAULT_BATTERY_AVERAGE_READINGS = 6
+BATTERY_AVERAGE_READINGS_MAXIMUM = 100
 
 DEFAULT_INA_I2C_ADDRESS = 0x40  # Red Reactor Default I2C Address
 DEFAULT_INA_SHUNT_OHMS = 0.05  # Red Reactor Shunt Ohms

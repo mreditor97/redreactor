@@ -205,6 +205,39 @@ def test_monitor_range_error_level_is_not_corrected(monitor, mock_ina):
     assert monitor.data.battery_level == monitor._calculate_battery_level(3.5)
 
 
+def test_battery_level_is_averaged(static_config, dynamic_config, mock_ina):
+    """The level comes from the average of the last average_readings readings."""
+    static_config["battery"]["average_readings"] = 3
+    monitor = _make_monitor(static_config, dynamic_config, mock_ina)
+
+    with patch.object(monitor, "_update"):
+        _run_monitor_with_ina(monitor, mock_ina, 3.5, 500.0)
+        _run_monitor_with_ina(monitor, mock_ina, 3.7, 500.0)
+        assert monitor.data.battery_level == monitor._calculate_battery_level(3.6)
+
+        # A brief dip only moves the level by a third of the drop
+        _run_monitor_with_ina(monitor, mock_ina, 3.3, 500.0)
+        assert monitor.data.battery_level == monitor._calculate_battery_level(3.5)
+
+        # The oldest reading drops out of the window
+        _run_monitor_with_ina(monitor, mock_ina, 3.5, 500.0)
+        assert monitor.data.battery_level == monitor._calculate_battery_level(3.5)
+
+
+def test_battery_average_includes_current(static_config, dynamic_config, mock_ina):
+    """The current is averaged too, for the load correction."""
+    static_config["battery"]["average_readings"] = 2
+    static_config["battery"]["internal_resistance"] = 100
+    monitor = _make_monitor(static_config, dynamic_config, mock_ina)
+
+    with patch.object(monitor, "_update"):
+        _run_monitor_with_ina(monitor, mock_ina, 3.5, 200.0)
+        _run_monitor_with_ina(monitor, mock_ina, 3.5, 800.0)
+
+    # Average 500mA through 100mOhm adds back 0.05V
+    assert monitor.data.battery_level == monitor._calculate_battery_level(3.55)
+
+
 # ---------------------------------------------------------------------------
 # _monitor behaviour
 # ---------------------------------------------------------------------------

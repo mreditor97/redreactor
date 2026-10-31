@@ -210,6 +210,7 @@ def static_config():
         },
         "battery": {
             "internal_resistance": 0,
+            "average_readings": 1,
             "curve": None,
         },
         "system": {

@@ -375,6 +375,9 @@ def test_linked_config_converts_quoted_new_options(tmp_path):
         ("battery: {curve: [[3.0, 0], ['3.6', 100]]}", "`battery.curve`"),
         ("battery: {curve: 3.0}", "`battery.curve`"),
         ("battery: {internal_resistance: -1}", "`battery.internal_resistance`"),
+        ("battery: {average_readings: 0}", "`battery.average_readings`"),
+        ("battery: {average_readings: 101}", "`battery.average_readings`"),
+        ("battery: {average_readings: 2.5}", "`battery.average_readings`"),
         ("battery: {internal_resistance: abc}", "`battery.internal_resistance`"),
     ],
 )
@@ -416,6 +419,7 @@ def test_linked_config_accepts_battery_curve(tmp_path):
 
     assert config.static["battery"]["curve"][1] == [3.6, 50]
     assert config.static["battery"]["internal_resistance"] == 0
+    assert config.static["battery"]["average_readings"] == 6
 
 
 def test_linked_config_converts_quoted_internal_resistance(tmp_path):

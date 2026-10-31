@@ -17,6 +17,8 @@ from typing import Any
 import yaml
 
 from redreactor.const import (
+    BATTERY_AVERAGE_READINGS_MAXIMUM,
+    DEFAULT_BATTERY_AVERAGE_READINGS,
     DEFAULT_BATTERY_CAPACITY,
     DEFAULT_BATTERY_INTERNAL_RESISTANCE,
     DEFAULT_BATTERY_RUNTIME_LIMIT,
@@ -72,6 +74,7 @@ def _convert_quoted_values(configuration: dict[str, Any]) -> None:
         ("ina", "max_expected_amps"),
         ("ina", "bus"),
         ("battery", "internal_resistance"),
+        ("battery", "average_readings"),
     ):
         value = configuration[section][key]
         if isinstance(value, str):
@@ -193,6 +196,15 @@ def _validate_static(configuration: dict[str, Any]) -> list[str]:
         ("ina.max_expected_amps", ina["max_expected_amps"]),
     ):
         check(path, _is_number(value) and value > 0, "must be a number above 0")
+    check(
+        "battery.average_readings",
+        not isinstance(configuration["battery"]["average_readings"], bool)
+        and isinstance(configuration["battery"]["average_readings"], int)
+        and 1
+        <= configuration["battery"]["average_readings"]
+        <= BATTERY_AVERAGE_READINGS_MAXIMUM,
+        f"must be a whole number from 1 to {BATTERY_AVERAGE_READINGS_MAXIMUM}",
+    )
     check(
         "battery.internal_resistance",
         _is_number(configuration["battery"]["internal_resistance"])
@@ -632,6 +644,8 @@ class LinkedConfiguration:
             "battery": {
                 # Milliohms, used to correct the voltage for the sag under load
                 "internal_resistance": DEFAULT_BATTERY_INTERNAL_RESISTANCE,
+                # Monitor readings averaged for the battery level, 1 turns it off
+                "average_readings": DEFAULT_BATTERY_AVERAGE_READINGS,
                 # Pairs of [resting voltage, battery level %], None uses a
                 # straight line between the minimum and maximum voltage
                 "curve": None,

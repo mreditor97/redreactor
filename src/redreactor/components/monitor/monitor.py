@@ -6,6 +6,7 @@ import json
 import logging
 import sys
 import time
+from collections import deque
 from itertools import pairwise
 from typing import TYPE_CHECKING, Any
 
@@ -14,6 +15,7 @@ from ina219 import INA219, DeviceRangeError
 from redreactor.components.monitor.data import MonitorData
 from redreactor.components.mqtt import MQTT
 from redreactor.const import (
+    DEFAULT_BATTERY_AVERAGE_READINGS,
     DEFAULT_BATTERY_INTERNAL_RESISTANCE,
     DEFAULT_BATTERY_VOLTAGE_HEADROOM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
@@ -97,6 +99,9 @@ class Monitor:
     # time.monotonic() when external power was lost, None while it is present
     _on_battery_since: float | None = None
 
+    # Recent (voltage, current) readings averaged for the battery level
+    _battery_readings: deque[tuple[float, float]]
+
     # Timers
     monitor_timer: RepeatTimer  # Runs Monitoring calculations
     report_timer: RepeatTimer  # Pushes updates to MQTT
@@ -123,6 +128,14 @@ class Monitor:
         )
         self._static_configuration = static_configuration
         self._dynamic_configuration = dynamic_configuration
+        self._battery_readings = deque(
+            maxlen=int(
+                static_configuration.get("battery", {}).get(
+                    "average_readings",
+                    DEFAULT_BATTERY_AVERAGE_READINGS,
+                ),
+            ),
+        )
 
         # Register Dynamic Configuration update listener
         self._dynamic_configuration.event.on(event_name="write", function=self._update)
@@ -182,7 +195,7 @@ class Monitor:
             try:
                 self.data.voltage = ina.voltage()
                 self.data.current = ina.current()
-                self.data.battery_level = self._calculate_battery_level(
+                self.data.battery_level = self._average_battery_level(
                     self.data.voltage,
                     self.data.current,
                 )
@@ -203,8 +216,9 @@ class Monitor:
                 )
                 # The real current is unknown, so the voltage can't be
                 # corrected for the load
-                self.data.battery_level = self._calculate_battery_level(
+                self.data.battery_level = self._average_battery_level(
                     self.data.voltage,
+                    0.0,
                 )
                 self._update()
             except ZeroDivisionError:
@@ -349,6 +363,22 @@ class Monitor:
             self.data.battery_runtime_limit,
         )
         return True
+
+    def _average_battery_level(self, voltage: float, current: float) -> int:
+        """Add a reading and calculate the battery level from the recent average.
+
+        Brief current spikes make single voltage readings jump, so the level
+        is worked out from the average of the last `battery.average_readings`
+        readings. The load correction is linear, so averaging the voltage and
+        current first gives the same result as averaging corrected voltages.
+        """
+        self._battery_readings.append((voltage, current))
+        count = len(self._battery_readings)
+
+        return self._calculate_battery_level(
+            sum(reading[0] for reading in self._battery_readings) / count,
+            sum(reading[1] for reading in self._battery_readings) / count,
+        )
 
     def _calculate_battery_level(self, voltage: float, current: float = 0.0) -> int:
         """Calculate Battery Level.
