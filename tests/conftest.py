@@ -169,6 +169,25 @@ def static_config():
                 "mode": "box",
                 "step": 1,
             },
+            "battery_capacity": {
+                "name": "battery_capacity",
+                "pretty": "Battery capacity",
+                "type": "number",
+                "unit": "mAh",
+                "entity_category": "diagnostic",
+                "min": 0,
+                "max": 20000,
+                "mode": "box",
+                "step": 1,
+            },
+            "battery_time_remaining": {
+                "name": "battery_time_remaining",
+                "pretty": "Battery time remaining",
+                "type": "sensor",
+                "unit": "min",
+                "device_class": "duration",
+                "suggested_display_precision": 0,
+            },
             "restart": {
                 "name": "restart",
                 "pretty": "Restart",
@@ -188,6 +207,11 @@ def static_config():
             "max_expected_amps": 5.5,
             "monitor_interval": 5,
             "bus": 1,
+        },
+        "battery": {
+            "internal_resistance": 0,
+            "average_readings": 1,
+            "curve": None,
         },
         "system": {
             "shutdown": "sudo shutdown 0 -h",

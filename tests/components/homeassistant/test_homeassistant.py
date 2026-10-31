@@ -195,3 +195,27 @@ def test_object_id_is_converted_to_default_entity_id(
     assert external_power["default_entity_id"] == "binary_sensor.ups_power"
     assert "object_id" not in external_power
     assert "deprecated" in caplog.text
+
+
+def test_discovery_includes_battery_capacity(homeassistant):
+    """The battery capacity is a number entity in mAh with a command topic."""
+    published = _discovery_payloads(homeassistant)
+
+    capacity = published[
+        "homeassistant/number/redreactor_redreactor_battery_capacity/config"
+    ]
+    assert capacity["command_topic"] == "redreactor/redreactor/set/battery_capacity"
+    assert capacity["unit_of_measurement"] == "mAh"
+    assert (capacity["min"], capacity["max"], capacity["step"]) == (0, 20000, 1)
+
+
+def test_discovery_includes_battery_time_remaining(homeassistant):
+    """The time remaining is a duration sensor in minutes."""
+    published = _discovery_payloads(homeassistant)
+
+    remaining = published[
+        "homeassistant/sensor/redreactor_redreactor_battery_time_remaining/config"
+    ]
+    assert remaining["unit_of_measurement"] == "min"
+    assert remaining["device_class"] == "duration"
+    assert remaining["value_template"] == "{{ value_json.battery_time_remaining }}"

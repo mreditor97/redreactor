@@ -10,12 +10,17 @@ import json
 import logging
 import math
 import os
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from redreactor.const import (
+    BATTERY_AVERAGE_READINGS_MAXIMUM,
+    DEFAULT_BATTERY_AVERAGE_READINGS,
+    DEFAULT_BATTERY_CAPACITY,
+    DEFAULT_BATTERY_INTERNAL_RESISTANCE,
     DEFAULT_BATTERY_RUNTIME_LIMIT,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
@@ -68,6 +73,8 @@ def _convert_quoted_values(configuration: dict[str, Any]) -> None:
         ("ina", "shunt_ohms"),
         ("ina", "max_expected_amps"),
         ("ina", "bus"),
+        ("battery", "internal_resistance"),
+        ("battery", "average_readings"),
     ):
         value = configuration[section][key]
         if isinstance(value, str):
@@ -102,6 +109,7 @@ def _validate_static(configuration: dict[str, Any]) -> list[str]:
         "status",
         "fields",
         "ina",
+        "battery",
         "system",
         "logging",
     )
@@ -178,6 +186,7 @@ def _validate_static(configuration: dict[str, Any]) -> list[str]:
     )
 
     errors.extend(_validate_tls(mqtt["tls"]))
+    errors.extend(_validate_battery_curve(configuration["battery"]["curve"]))
 
     # Positive numbers, a zero interval would spin a timer thread
     for path, value in (
@@ -187,6 +196,21 @@ def _validate_static(configuration: dict[str, Any]) -> list[str]:
         ("ina.max_expected_amps", ina["max_expected_amps"]),
     ):
         check(path, _is_number(value) and value > 0, "must be a number above 0")
+    check(
+        "battery.average_readings",
+        not isinstance(configuration["battery"]["average_readings"], bool)
+        and isinstance(configuration["battery"]["average_readings"], int)
+        and 1
+        <= configuration["battery"]["average_readings"]
+        <= BATTERY_AVERAGE_READINGS_MAXIMUM,
+        f"must be a whole number from 1 to {BATTERY_AVERAGE_READINGS_MAXIMUM}",
+    )
+    check(
+        "battery.internal_resistance",
+        _is_number(configuration["battery"]["internal_resistance"])
+        and configuration["battery"]["internal_resistance"] >= 0,
+        "must be a number of milliohms, 0 or more",
+    )
     check(
         "homeassistant.expire_after",
         _is_number(homeassistant["expire_after"])
@@ -220,6 +244,39 @@ def _validate_static(configuration: dict[str, Any]) -> list[str]:
         check(path, isinstance(value, str) and value.strip() != "", "must be a command")
 
     return errors
+
+
+def _validate_battery_curve(curve: Any) -> list[str]:
+    """Check the battery curve is usable for interpolation.
+
+    The voltages must rise and the levels must not fall, so each voltage maps
+    to one battery level.
+    """
+    if curve is None:
+        return []
+
+    requirement = (
+        "`battery.curve` must be a list of at least 2 [voltage, level] pairs, "
+        "with rising voltages and levels from 0 to 100 that don't fall"
+    )
+    if (
+        not isinstance(curve, list)
+        or len(curve) < 2  # noqa: PLR2004
+        or not all(
+            isinstance(point, list)
+            and len(point) == 2  # noqa: PLR2004
+            and all(_is_number(value) for value in point)
+            and 0 <= point[1] <= 100  # noqa: PLR2004
+            for point in curve
+        )
+    ):
+        return [f"{requirement}, got {curve!r}"]
+
+    for (voltage, level), (next_voltage, next_level) in pairwise(curve):
+        if next_voltage <= voltage or next_level < level:
+            return [f"{requirement}, got {curve!r}"]
+
+    return []
 
 
 def _validate_tls(tls: dict[str, Any]) -> list[str]:
@@ -269,6 +326,7 @@ class DynamicConfiguration:
             "battery_voltage_minimum": DEFAULT_BATTERY_VOLTAGE_MINIMUM,
             "battery_voltage_maximum": DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
             "battery_runtime_limit": DEFAULT_BATTERY_RUNTIME_LIMIT,
+            "battery_capacity": DEFAULT_BATTERY_CAPACITY,
         }
 
         dynamic_path = Path(self._dynamic_file)
@@ -300,13 +358,14 @@ class DynamicConfiguration:
         # Older versions stored received values without checking them, so a
         # non-numeric value would stop the service from ever starting again. A
         # report interval of 0 or less would spin the report timer, and a
-        # negative runtime limit is meaningless.
+        # negative runtime limit or capacity is meaningless.
         for key, default in dynamic_file_defaults.items():
             value = data[key]
             if (
                 not _is_number(value)
                 or (key == "report_interval" and value <= 0)
                 or (key == "battery_runtime_limit" and value < 0)
+                or (key == "battery_capacity" and value < 0)
             ):
                 logger.warning(
                     "Invalid %s value %r in %s, using the default %s",
@@ -543,6 +602,25 @@ class LinkedConfiguration:
                     "mode": "box",
                     "step": 1,
                 },
+                "battery_capacity": {
+                    "name": "battery_capacity",
+                    "pretty": "Battery capacity",
+                    "type": "number",
+                    "unit": "mAh",
+                    "entity_category": "diagnostic",
+                    "min": 0,
+                    "max": 20000,
+                    "mode": "box",
+                    "step": 1,
+                },
+                "battery_time_remaining": {
+                    "name": "battery_time_remaining",
+                    "pretty": "Battery time remaining",
+                    "type": "sensor",
+                    "unit": "min",
+                    "device_class": "duration",
+                    "suggested_display_precision": 0,
+                },
                 "restart": {
                     "name": "restart",
                     "pretty": "Restart",
@@ -562,6 +640,15 @@ class LinkedConfiguration:
                 "max_expected_amps": DEFAULT_INA_MAX_EXPECTED_AMPS,
                 "monitor_interval": DEFAULT_INA_MONITOR_INTERVAL,
                 "bus": DEFAULT_INA_I2C_BUS,
+            },
+            "battery": {
+                # Milliohms, used to correct the voltage for the sag under load
+                "internal_resistance": DEFAULT_BATTERY_INTERNAL_RESISTANCE,
+                # Monitor readings averaged for the battery level, 1 turns it off
+                "average_readings": DEFAULT_BATTERY_AVERAGE_READINGS,
+                # Pairs of [resting voltage, battery level %], None uses a
+                # straight line between the minimum and maximum voltage
+                "curve": None,
             },
             "system": {
                 "shutdown": "sudo shutdown 0 -h",

@@ -298,6 +298,7 @@ def test_dynamic_config_defaults_battery_runtime_limit_to_off(tmp_path):
     config = DynamicConfiguration(dynamic_file=str(dynamic_file))
 
     assert config.data["battery_runtime_limit"] == 0
+    assert config.data["battery_capacity"] == 0
     assert config.data["report_interval"] == 60
 
 
@@ -313,6 +314,8 @@ def test_linked_config_new_defaults(tmp_path):
     assert config.static["fields"]["power"]["unit"] == "W"
     assert config.static["fields"]["charging"]["type"] == "binary_sensor"
     assert config.static["fields"]["battery_runtime_limit"]["type"] == "number"
+    assert config.static["fields"]["battery_capacity"]["unit"] == "mAh"
+    assert config.static["fields"]["battery_time_remaining"]["type"] == "sensor"
     assert config.static["fields"]["cpu_stat_raw"]["state_class"] is None
     assert (
         config.static["fields"]["battery_warning_threshold"]["pretty"]
@@ -365,6 +368,17 @@ def test_linked_config_converts_quoted_new_options(tmp_path):
         ("mqtt: {tls: {enabled: 'maybe'}}", "`mqtt.tls.enabled`"),
         ("mqtt: {tls: {insecure: 1}}", "`mqtt.tls.insecure`"),
         ("mqtt: {tls: {ca_certs: 5}}", "`mqtt.tls.ca_certs`"),
+        ("battery: {curve: [[3.0, 0]]}", "`battery.curve`"),
+        ("battery: {curve: [[3.6, 0], [3.0, 100]]}", "`battery.curve`"),
+        ("battery: {curve: [[3.0, 50], [3.6, 10]]}", "`battery.curve`"),
+        ("battery: {curve: [[3.0, 0], [3.6, 101]]}", "`battery.curve`"),
+        ("battery: {curve: [[3.0, 0], ['3.6', 100]]}", "`battery.curve`"),
+        ("battery: {curve: 3.0}", "`battery.curve`"),
+        ("battery: {internal_resistance: -1}", "`battery.internal_resistance`"),
+        ("battery: {average_readings: 0}", "`battery.average_readings`"),
+        ("battery: {average_readings: 101}", "`battery.average_readings`"),
+        ("battery: {average_readings: 2.5}", "`battery.average_readings`"),
+        ("battery: {internal_resistance: abc}", "`battery.internal_resistance`"),
     ],
 )
 def test_linked_config_rejects_invalid_new_options(tmp_path, contents, message):
@@ -384,3 +398,35 @@ def test_dynamic_config_resets_negative_runtime_limit(tmp_path):
     config = DynamicConfiguration(dynamic_file=str(dynamic_file))
 
     assert config.data["battery_runtime_limit"] == 0
+
+
+def test_dynamic_config_resets_negative_battery_capacity(tmp_path):
+    """A negative battery capacity in the dynamic file falls back to not set."""
+    dynamic_file = tmp_path / "dynamic.json"
+    dynamic_file.write_text(json.dumps({"battery_capacity": -3000}))
+
+    config = DynamicConfiguration(dynamic_file=str(dynamic_file))
+
+    assert config.data["battery_capacity"] == 0
+
+
+def test_linked_config_accepts_battery_curve(tmp_path):
+    """A rising voltage curve is accepted, and none is the default."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text("battery: {curve: [[3.0, 0], [3.6, 50], [4.1, 100]]}")
+
+    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+
+    assert config.static["battery"]["curve"][1] == [3.6, 50]
+    assert config.static["battery"]["internal_resistance"] == 0
+    assert config.static["battery"]["average_readings"] == 6
+
+
+def test_linked_config_converts_quoted_internal_resistance(tmp_path):
+    """A quoted internal resistance is read as a number."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text("battery: {internal_resistance: '85'}")
+
+    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+
+    assert config.static["battery"]["internal_resistance"] == 85

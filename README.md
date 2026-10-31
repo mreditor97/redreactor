@@ -64,7 +64,9 @@ Topic `redreactor/your-configured-hostname/state`
   "battery_voltage_minimum": 2.6,
   "battery_voltage_maximum": 4.2,
   "report_interval": 30,
-  "battery_runtime_limit": 0
+  "battery_runtime_limit": 0,
+  "battery_capacity": 3000,
+  "battery_time_remaining": null
 }
 ```
 
@@ -84,6 +86,8 @@ Topic `redreactor/your-configured-hostname/state`
 - `battery_voltage_maximum` is the voltage at which is to be considered the maximum at which the battery can be (this is used in the calculation of the `battery_level`)
 - `report_interval` is the reporting interval at which the data will be published onto the **state** topic
 - `battery_runtime_limit` is the number of minutes to run on battery before a safe shutdown, whatever the charge. `0` turns it off
+- `battery_capacity` is the total capacity of the batteries in mAh (with two cells in parallel, the sum of both), set it from Home Assistant or the command topic. `0` means not set
+- `battery_time_remaining` is a rough estimate of the minutes left on battery before the low battery shutdown, from `battery_capacity`, `battery_level` above `battery_warning_threshold` and `current`. It is `null` (unknown in Home Assistant) while there is external power or `battery_capacity` is `0`. The battery level is worked out from the voltage, which isn't linear with the charge left, so treat it as a guide
 
 ### Status
 
@@ -102,6 +106,7 @@ Command topic | value:
 - `battery_voltage_maximum` | value (float)
 - `report_interval` | value (int)
 - `battery_runtime_limit` | value (int, minutes, `0` to turn off)
+- `battery_capacity` | value (int, mAh, `0` to `20000`, `0` for not set)
 - `restart` | no value required
 - `shutdown` | no value required
 
@@ -123,7 +128,30 @@ Command topic | value:
       insecure: false # true skips the hostname check, for testing only
   ```
 
+- `battery.internal_resistance` is the battery's internal resistance in mΩ (default `0`, off), see [Battery level](#battery-level)
+- `battery.average_readings` is how many monitor readings are averaged for `battery_level` (default `6`, 30 seconds at the default `ina.monitor_interval`, `1` turns it off), see [Battery level](#battery-level)
+- `battery.curve` maps the battery's resting voltage to its level, see [Battery level](#battery-level)
 - `fields.<field>.default_entity_id` sets the entity ID Home Assistant creates the entity with, for example `sensor.ups_voltage`. The older `object_id` option still works but is deprecated by Home Assistant
+
+### Battery level
+
+By default `battery_level` is a straight line from `battery_voltage_minimum` (0%) to `battery_voltage_maximum` (100%). A Li-ion battery's voltage doesn't fall evenly as it discharges, and it sags further the more current is drawn, so the level can jump around under load. The level is worked out from the average of the last `battery.average_readings` readings (6 by default), which smooths out brief current spikes, as the Red Reactor manual recommends. Two more settings improve it:
+
+1. **Internal resistance** (`battery.internal_resistance` in the configuration file). The voltage sags under load by about current × resistance, so that is added back before working out the level (and taken off while charging). With the Pi idle, note the voltage and current, then put it under load (for example `stress -c 4`) and note them again. The resistance in mΩ is the voltage drop in mV divided by the current rise in A. This includes the holder, wiring and board as well as the cell, so it is usually higher than the datasheet figure. With two cells in parallel, measure them together; the result is the combined resistance.
+2. **Voltage curve** (`battery.curve` in the configuration file). Pairs of `[resting voltage, level %]`, with rising voltages. The level is interpolated between them, and the ends are clamped. When a curve is set, `battery_voltage_minimum` and `battery_voltage_maximum` no longer affect the level.
+
+   ```yaml
+   battery:
+     internal_resistance: 0 # mΩ, your measured value
+     average_readings: 6
+     curve:
+       - [3.00, 0]
+       - [3.45, 10]
+       # ... the points measured for your battery
+       - [4.15, 100]
+   ```
+
+   The values above are placeholders, not a real battery's curve. One way to measure your own is to charge fully, set `battery.internal_resistance`, then run on battery at a steady load until shutdown, and use the voltage history from Home Assistant: with a steady current the charge used is proportional to the time, so the voltage at 10% of the run time is the 90% point, and so on.
 
 The log file is rotated at 1 MB, keeping 3 old files.
 

@@ -6,6 +6,8 @@ import json
 import logging
 import sys
 import time
+from collections import deque
+from itertools import pairwise
 from typing import TYPE_CHECKING, Any
 
 from ina219 import INA219, DeviceRangeError
@@ -13,6 +15,8 @@ from ina219 import INA219, DeviceRangeError
 from redreactor.components.monitor.data import MonitorData
 from redreactor.components.mqtt import MQTT
 from redreactor.const import (
+    DEFAULT_BATTERY_AVERAGE_READINGS,
+    DEFAULT_BATTERY_INTERNAL_RESISTANCE,
     DEFAULT_BATTERY_VOLTAGE_HEADROOM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
@@ -95,6 +99,9 @@ class Monitor:
     # time.monotonic() when external power was lost, None while it is present
     _on_battery_since: float | None = None
 
+    # Recent (voltage, current) readings averaged for the battery level
+    _battery_readings: deque[tuple[float, float]]
+
     # Timers
     monitor_timer: RepeatTimer  # Runs Monitoring calculations
     report_timer: RepeatTimer  # Pushes updates to MQTT
@@ -121,6 +128,14 @@ class Monitor:
         )
         self._static_configuration = static_configuration
         self._dynamic_configuration = dynamic_configuration
+        self._battery_readings = deque(
+            maxlen=int(
+                static_configuration.get("battery", {}).get(
+                    "average_readings",
+                    DEFAULT_BATTERY_AVERAGE_READINGS,
+                ),
+            ),
+        )
 
         # Register Dynamic Configuration update listener
         self._dynamic_configuration.event.on(event_name="write", function=self._update)
@@ -179,10 +194,11 @@ class Monitor:
         if ina:
             try:
                 self.data.voltage = ina.voltage()
-                self.data.battery_level = self._calculate_battery_level(
-                    self.data.voltage,
-                )
                 self.data.current = ina.current()
+                self.data.battery_level = self._average_battery_level(
+                    self.data.voltage,
+                    self.data.current,
+                )
                 # pi-ina219 reports milliwatts, Home Assistant is sent watts
                 self.data.power = ina.power() / 1000
                 # A negative current means the battery is being charged
@@ -197,6 +213,12 @@ class Monitor:
                 self.data.charging = False
                 self.data.current = (
                     float(self._static_configuration["ina"]["max_expected_amps"]) * 1000
+                )
+                # The real current is unknown, so the voltage can't be
+                # corrected for the load
+                self.data.battery_level = self._average_battery_level(
+                    self.data.voltage,
+                    0.0,
                 )
                 self._update()
             except ZeroDivisionError:
@@ -342,8 +364,72 @@ class Monitor:
         )
         return True
 
-    def _calculate_battery_level(self, voltage: float) -> int:
+    def _average_battery_level(self, voltage: float, current: float) -> int:
+        """Add a reading and calculate the battery level from the recent average.
+
+        Brief current spikes make single voltage readings jump, so the level
+        is worked out from the average of the last `battery.average_readings`
+        readings. The load correction is linear, so averaging the voltage and
+        current first gives the same result as averaging corrected voltages.
+        """
+        self._battery_readings.append((voltage, current))
+        count = len(self._battery_readings)
+
+        return self._calculate_battery_level(
+            sum(reading[0] for reading in self._battery_readings) / count,
+            sum(reading[1] for reading in self._battery_readings) / count,
+        )
+
+    def _calculate_battery_level(self, voltage: float, current: float = 0.0) -> int:
         """Calculate Battery Level.
+
+        The battery voltage sags under load by roughly current x internal
+        resistance, so that is added back to estimate the resting voltage.
+        Charging current is negative, so the rise while charging is taken off.
+        A resistance of 0 leaves the voltage as measured.
+
+        The resting voltage is then turned into a level using `battery.curve`
+        when it is configured, as a Li-ion battery's voltage isn't linear with
+        its charge. Otherwise a straight line between the minimum and maximum
+        voltage is used.
+        """
+        battery_configuration = self._static_configuration.get("battery", {})
+        internal_resistance = float(
+            battery_configuration.get(
+                "internal_resistance",
+                DEFAULT_BATTERY_INTERNAL_RESISTANCE,
+            ),
+        )
+        resting_voltage = voltage + current / 1000 * internal_resistance / 1000
+
+        curve = battery_configuration.get("curve")
+        if curve:
+            return round(self._interpolate_battery_curve(curve, resting_voltage))
+
+        return self._calculate_linear_battery_level(resting_voltage)
+
+    @staticmethod
+    def _interpolate_battery_curve(curve: list[list[float]], voltage: float) -> float:
+        """Interpolate the battery level between the points of the curve.
+
+        The curve is checked at start up to have rising voltages, so it can be
+        walked in order. Voltages outside it are clamped to its ends.
+        """
+        if voltage <= curve[0][0]:
+            return curve[0][1]
+
+        for lower, upper in pairwise(curve):
+            lower_voltage, lower_level = lower
+            upper_voltage, upper_level = upper
+            if voltage <= upper_voltage:
+                return lower_level + (voltage - lower_voltage) / (
+                    upper_voltage - lower_voltage
+                ) * (upper_level - lower_level)
+
+        return curve[-1][1]
+
+    def _calculate_linear_battery_level(self, voltage: float) -> int:
+        """Calculate the battery level on a straight line between two voltages.
 
         Subtracting DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP from the ceiling
         prevents the level from reaching 100% while the battery is still under
@@ -384,6 +470,32 @@ class Monitor:
             ),
         )
 
+    def _calculate_battery_time_remaining(self) -> float | None:
+        """Estimate the minutes left on battery before the low battery shutdown.
+
+        The charge left above the shutdown level, taken from the battery
+        capacity and the voltage based battery level, divided by the current
+        being drawn. The battery level is not linear with charge and the
+        current changes with load, so this is a rough guide only.
+
+        Returns None (unknown in Home Assistant) when the capacity isn't set,
+        or when there is external power so the battery isn't discharging.
+        """
+        if (
+            self.data.battery_capacity <= 0
+            or self.data.external_power
+            or self.data.current <= 0
+        ):
+            return None
+
+        usable_percentage = max(
+            self.data.battery_level - self.data.battery_warning_threshold,
+            0,
+        )
+        remaining_mah = self.data.battery_capacity * usable_percentage / 100
+
+        return round(remaining_mah / self.data.current * 60, 1)
+
     def _update_cpu_information(self) -> None:
         """Update CPU information, including temperature and throttling."""
         try:
@@ -413,6 +525,8 @@ class Monitor:
 
         # Update CPU information before publishing info
         self._update_cpu_information()
+
+        self.data.battery_time_remaining = self._calculate_battery_time_remaining()
 
         # Publish heartbeat to status endpoint
         MQTT.event.emit(
@@ -474,6 +588,8 @@ class Monitor:
                     f"{self._static_configuration['fields']['battery_voltage_maximum']['name']}": self.data.battery_voltage_maximum,  # noqa: E501
                     f"{self._static_configuration['fields']['report_interval']['name']}": self.data.report_interval,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_runtime_limit']['name']}": self.data.battery_runtime_limit,  # noqa: E501
+                    f"{self._static_configuration['fields']['battery_capacity']['name']}": self.data.battery_capacity,  # noqa: E501
+                    f"{self._static_configuration['fields']['battery_time_remaining']['name']}": self.data.battery_time_remaining,  # noqa: E501
                 },
             ),
         )
@@ -508,6 +624,11 @@ class Monitor:
         # Update Battery Runtime Limit
         self.data.battery_runtime_limit = int(
             self._dynamic_configuration.data["battery_runtime_limit"],
+        )
+
+        # Update Battery Capacity
+        self.data.battery_capacity = int(
+            self._dynamic_configuration.data["battery_capacity"],
         )
 
         if self.report_timer:
