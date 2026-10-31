@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import sys
-import time
 from typing import TYPE_CHECKING, Any
 
 from ina219 import INA219, DeviceRangeError
@@ -91,9 +90,6 @@ class Monitor:
 
     # Whether the first reading after start up has been checked
     _start_up_checked: bool = False
-
-    # time.monotonic() when external power was lost, None while it is present
-    _on_battery_since: float | None = None
 
     # Timers
     monitor_timer: RepeatTimer  # Runs Monitoring calculations
@@ -264,9 +260,6 @@ class Monitor:
         else:
             self._empty_readings = 0
 
-        if self._battery_runtime_exceeded():
-            shutdown = True
-
         # Shutdown system
         if shutdown:
             self.logger.warning(
@@ -313,34 +306,6 @@ class Monitor:
                 self.data.battery_warning_threshold,
                 self.data.current,
             )
-
-    def _battery_runtime_exceeded(self) -> bool:
-        """Check whether the device has been on battery for too long.
-
-        Tracks how long external power has been missing, and returns True once
-        that is longer than the battery runtime limit. A limit of 0 disables it.
-        """
-        if self.data.external_power:
-            self._on_battery_since = None
-            return False
-
-        now = time.monotonic()
-        if self._on_battery_since is None:
-            self._on_battery_since = now
-
-        if self.data.battery_runtime_limit <= 0:
-            return False
-
-        on_battery_minutes = (now - self._on_battery_since) / 60
-        if on_battery_minutes < self.data.battery_runtime_limit:
-            return False
-
-        self.logger.warning(
-            "On battery for %.1f minutes, over the %i minute runtime limit",
-            on_battery_minutes,
-            self.data.battery_runtime_limit,
-        )
-        return True
 
     def _calculate_battery_level(self, voltage: float) -> int:
         """Calculate Battery Level.
@@ -473,7 +438,6 @@ class Monitor:
                     f"{self._static_configuration['fields']['battery_voltage_minimum']['name']}": self.data.battery_voltage_minimum,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_voltage_maximum']['name']}": self.data.battery_voltage_maximum,  # noqa: E501
                     f"{self._static_configuration['fields']['report_interval']['name']}": self.data.report_interval,  # noqa: E501
-                    f"{self._static_configuration['fields']['battery_runtime_limit']['name']}": self.data.battery_runtime_limit,  # noqa: E501
                 },
             ),
         )
@@ -503,11 +467,6 @@ class Monitor:
         # Update Report Interval
         self.data.report_interval = int(
             self._dynamic_configuration.data["report_interval"],
-        )
-
-        # Update Battery Runtime Limit
-        self.data.battery_runtime_limit = int(
-            self._dynamic_configuration.data["battery_runtime_limit"],
         )
 
         if self.report_timer:

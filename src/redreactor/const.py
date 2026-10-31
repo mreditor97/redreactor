@@ -14,8 +14,6 @@ DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP = 0.03
 # Voltage more than this above the configured maximum indicates external power
 # is connected. The headroom avoids false positives from measurement noise.
 DEFAULT_BATTERY_VOLTAGE_HEADROOM = 0.05
-# Minutes on battery before shutting down regardless of charge, 0 disables it
-DEFAULT_BATTERY_RUNTIME_LIMIT = 0
 
 DEFAULT_INA_I2C_ADDRESS = 0x40  # Red Reactor Default I2C Address
 DEFAULT_INA_SHUNT_OHMS = 0.05  # Red Reactor Shunt Ohms
