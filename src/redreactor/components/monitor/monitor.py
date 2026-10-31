@@ -384,6 +384,32 @@ class Monitor:
             ),
         )
 
+    def _calculate_battery_time_remaining(self) -> float | None:
+        """Estimate the minutes left on battery before the low battery shutdown.
+
+        The charge left above the shutdown level, taken from the battery
+        capacity and the voltage based battery level, divided by the current
+        being drawn. The battery level is not linear with charge and the
+        current changes with load, so this is a rough guide only.
+
+        Returns None (unknown in Home Assistant) when the capacity isn't set,
+        or when there is external power so the battery isn't discharging.
+        """
+        if (
+            self.data.battery_capacity <= 0
+            or self.data.external_power
+            or self.data.current <= 0
+        ):
+            return None
+
+        usable_percentage = max(
+            self.data.battery_level - self.data.battery_warning_threshold,
+            0,
+        )
+        remaining_mah = self.data.battery_capacity * usable_percentage / 100
+
+        return round(remaining_mah / self.data.current * 60, 1)
+
     def _update_cpu_information(self) -> None:
         """Update CPU information, including temperature and throttling."""
         try:
@@ -413,6 +439,8 @@ class Monitor:
 
         # Update CPU information before publishing info
         self._update_cpu_information()
+
+        self.data.battery_time_remaining = self._calculate_battery_time_remaining()
 
         # Publish heartbeat to status endpoint
         MQTT.event.emit(
@@ -474,6 +502,8 @@ class Monitor:
                     f"{self._static_configuration['fields']['battery_voltage_maximum']['name']}": self.data.battery_voltage_maximum,  # noqa: E501
                     f"{self._static_configuration['fields']['report_interval']['name']}": self.data.report_interval,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_runtime_limit']['name']}": self.data.battery_runtime_limit,  # noqa: E501
+                    f"{self._static_configuration['fields']['battery_capacity']['name']}": self.data.battery_capacity,  # noqa: E501
+                    f"{self._static_configuration['fields']['battery_time_remaining']['name']}": self.data.battery_time_remaining,  # noqa: E501
                 },
             ),
         )
@@ -508,6 +538,11 @@ class Monitor:
         # Update Battery Runtime Limit
         self.data.battery_runtime_limit = int(
             self._dynamic_configuration.data["battery_runtime_limit"],
+        )
+
+        # Update Battery Capacity
+        self.data.battery_capacity = int(
+            self._dynamic_configuration.data["battery_capacity"],
         )
 
         if self.report_timer:

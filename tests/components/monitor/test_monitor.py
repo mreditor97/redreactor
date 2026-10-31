@@ -531,6 +531,79 @@ def test_runtime_limit_resets_when_power_returns(monitor, mock_ina, dynamic_conf
 
 
 # ---------------------------------------------------------------------------
+# Battery capacity and time remaining
+# ---------------------------------------------------------------------------
+
+
+def test_time_remaining_unknown_without_capacity(monitor, mock_ina):
+    """With the default capacity of 0, no estimate is made."""
+    with patch.object(monitor, "_update"):
+        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
+
+    assert monitor._calculate_battery_time_remaining() is None
+
+
+def test_time_remaining_on_battery(monitor, mock_ina, dynamic_config):
+    """The charge above the shutdown level is divided by the current drawn."""
+    dynamic_config.data["battery_capacity"] = 3000
+    with patch.object(monitor, "_update"):
+        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
+
+    assert monitor.data.battery_level == 49
+    # (49% - 10% shutdown level) of 3000mAh = 1170mAh, at 500mA is 140.4 minutes
+    assert monitor._calculate_battery_time_remaining() == 140.4
+
+
+def test_time_remaining_zero_at_shutdown_level(monitor, mock_ina, dynamic_config):
+    """At or below the shutdown level there is no time left, not a negative."""
+    dynamic_config.data["battery_capacity"] = 3000
+    with patch.object(monitor, "_update"):
+        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_7_PERCENT, 500.0)
+
+    assert monitor._calculate_battery_time_remaining() == 0
+
+
+@pytest.mark.parametrize("current", [-50.0, 5.0])
+def test_time_remaining_unknown_with_external_power(
+    monitor,
+    mock_ina,
+    dynamic_config,
+    current,
+):
+    """Charging or floating on external power gives no estimate."""
+    dynamic_config.data["battery_capacity"] = 3000
+    with patch.object(monitor, "_update"):
+        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, current)
+
+    assert monitor._calculate_battery_time_remaining() is None
+
+
+def test_state_payload_includes_capacity_and_time_remaining(
+    monitor,
+    mock_ina,
+    dynamic_config,
+):
+    """The capacity and the estimate are published on the state topic."""
+    import json
+
+    from redreactor.components.mqtt import MQTT
+
+    published = {}
+    MQTT.event.on(
+        "publish",
+        lambda topic, payload, **_: published.__setitem__(topic, payload),
+    )
+    dynamic_config.data["battery_capacity"] = 3000
+    with patch.object(monitor, "_update"):
+        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
+    monitor._update()
+
+    state = json.loads(published["redreactor/redreactor/state"])
+    assert state["battery_capacity"] == 3000
+    assert state["battery_time_remaining"] == 140.4
+
+
+# ---------------------------------------------------------------------------
 # Published state and INA219 setup
 # ---------------------------------------------------------------------------
 

@@ -64,7 +64,9 @@ Topic `redreactor/your-configured-hostname/state`
   "battery_voltage_minimum": 2.6,
   "battery_voltage_maximum": 4.2,
   "report_interval": 30,
-  "battery_runtime_limit": 0
+  "battery_runtime_limit": 0,
+  "battery_capacity": 3000,
+  "battery_time_remaining": null
 }
 ```
 
@@ -84,6 +86,8 @@ Topic `redreactor/your-configured-hostname/state`
 - `battery_voltage_maximum` is the voltage at which is to be considered the maximum at which the battery can be (this is used in the calculation of the `battery_level`)
 - `report_interval` is the reporting interval at which the data will be published onto the **state** topic
 - `battery_runtime_limit` is the number of minutes to run on battery before a safe shutdown, whatever the charge. `0` turns it off
+- `battery_capacity` is the capacity of the batteries in mAh, set it from Home Assistant or the command topic. `0` means not set
+- `battery_time_remaining` is a rough estimate of the minutes left on battery before the low battery shutdown, from `battery_capacity`, `battery_level` above `battery_warning_threshold` and `current`. It is `null` (unknown in Home Assistant) while there is external power or `battery_capacity` is `0`. The battery level is worked out from the voltage, which isn't linear with the charge left, so treat it as a guide
 
 ### Status
 
@@ -102,6 +106,7 @@ Command topic | value:
 - `battery_voltage_maximum` | value (float)
 - `report_interval` | value (int)
 - `battery_runtime_limit` | value (int, minutes, `0` to turn off)
+- `battery_capacity` | value (int, mAh, `0` to `20000`, `0` for not set)
 - `restart` | no value required
 - `shutdown` | no value required
 

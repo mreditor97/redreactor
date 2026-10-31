@@ -16,6 +16,7 @@ from typing import Any
 import yaml
 
 from redreactor.const import (
+    DEFAULT_BATTERY_CAPACITY,
     DEFAULT_BATTERY_RUNTIME_LIMIT,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
@@ -269,6 +270,7 @@ class DynamicConfiguration:
             "battery_voltage_minimum": DEFAULT_BATTERY_VOLTAGE_MINIMUM,
             "battery_voltage_maximum": DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
             "battery_runtime_limit": DEFAULT_BATTERY_RUNTIME_LIMIT,
+            "battery_capacity": DEFAULT_BATTERY_CAPACITY,
         }
 
         dynamic_path = Path(self._dynamic_file)
@@ -300,13 +302,14 @@ class DynamicConfiguration:
         # Older versions stored received values without checking them, so a
         # non-numeric value would stop the service from ever starting again. A
         # report interval of 0 or less would spin the report timer, and a
-        # negative runtime limit is meaningless.
+        # negative runtime limit or capacity is meaningless.
         for key, default in dynamic_file_defaults.items():
             value = data[key]
             if (
                 not _is_number(value)
                 or (key == "report_interval" and value <= 0)
                 or (key == "battery_runtime_limit" and value < 0)
+                or (key == "battery_capacity" and value < 0)
             ):
                 logger.warning(
                     "Invalid %s value %r in %s, using the default %s",
@@ -542,6 +545,25 @@ class LinkedConfiguration:
                     "max": 1440,
                     "mode": "box",
                     "step": 1,
+                },
+                "battery_capacity": {
+                    "name": "battery_capacity",
+                    "pretty": "Battery capacity",
+                    "type": "number",
+                    "unit": "mAh",
+                    "entity_category": "diagnostic",
+                    "min": 0,
+                    "max": 20000,
+                    "mode": "box",
+                    "step": 1,
+                },
+                "battery_time_remaining": {
+                    "name": "battery_time_remaining",
+                    "pretty": "Battery time remaining",
+                    "type": "sensor",
+                    "unit": "min",
+                    "device_class": "duration",
+                    "suggested_display_precision": 0,
                 },
                 "restart": {
                     "name": "restart",

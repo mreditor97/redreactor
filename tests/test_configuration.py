@@ -298,6 +298,7 @@ def test_dynamic_config_defaults_battery_runtime_limit_to_off(tmp_path):
     config = DynamicConfiguration(dynamic_file=str(dynamic_file))
 
     assert config.data["battery_runtime_limit"] == 0
+    assert config.data["battery_capacity"] == 0
     assert config.data["report_interval"] == 60
 
 
@@ -313,6 +314,8 @@ def test_linked_config_new_defaults(tmp_path):
     assert config.static["fields"]["power"]["unit"] == "W"
     assert config.static["fields"]["charging"]["type"] == "binary_sensor"
     assert config.static["fields"]["battery_runtime_limit"]["type"] == "number"
+    assert config.static["fields"]["battery_capacity"]["unit"] == "mAh"
+    assert config.static["fields"]["battery_time_remaining"]["type"] == "sensor"
     assert config.static["fields"]["cpu_stat_raw"]["state_class"] is None
     assert (
         config.static["fields"]["battery_warning_threshold"]["pretty"]
@@ -384,3 +387,13 @@ def test_dynamic_config_resets_negative_runtime_limit(tmp_path):
     config = DynamicConfiguration(dynamic_file=str(dynamic_file))
 
     assert config.data["battery_runtime_limit"] == 0
+
+
+def test_dynamic_config_resets_negative_battery_capacity(tmp_path):
+    """A negative battery capacity in the dynamic file falls back to not set."""
+    dynamic_file = tmp_path / "dynamic.json"
+    dynamic_file.write_text(json.dumps({"battery_capacity": -3000}))
+
+    config = DynamicConfiguration(dynamic_file=str(dynamic_file))
+
+    assert config.data["battery_capacity"] == 0

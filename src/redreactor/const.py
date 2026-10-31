@@ -16,6 +16,8 @@ DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP = 0.03
 DEFAULT_BATTERY_VOLTAGE_HEADROOM = 0.05
 # Minutes on battery before shutting down regardless of charge, 0 disables it
 DEFAULT_BATTERY_RUNTIME_LIMIT = 0
+# Battery capacity in mAh, used to estimate the time remaining, 0 means not set
+DEFAULT_BATTERY_CAPACITY = 0
 
 DEFAULT_INA_I2C_ADDRESS = 0x40  # Red Reactor Default I2C Address
 DEFAULT_INA_SHUNT_OHMS = 0.05  # Red Reactor Shunt Ohms
