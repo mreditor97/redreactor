@@ -511,8 +511,9 @@ class Monitor:
         )
 
         if self.report_timer:
-            # Update Monitor timer interval
-            self.report_timer.interval = self.data.report_interval
+            # Apply the new report interval straight away, rather than after
+            # the tick that is already waiting on the old interval
+            self.report_timer.set_interval(self.data.report_interval)
 
     def _mqtt_on_connect(
         self,

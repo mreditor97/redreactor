@@ -608,3 +608,25 @@ def test_read_once_exits_when_board_is_missing(static_config):
         read_once(static_config)
 
     assert exit_info.value.code == 1
+
+
+# ---------------------------------------------------------------------------
+# Report interval
+# ---------------------------------------------------------------------------
+
+
+def test_report_interval_change_restarts_report_timer(monitor, dynamic_config):
+    """A new report interval takes effect now, not after the old tick."""
+    monitor.report_timer.start()
+    pending = monitor.report_timer._timer
+
+    dynamic_config.data["report_interval"] = 5
+    monitor._update_dynamic_configuration()
+
+    try:
+        assert monitor.report_timer.interval == 5
+        assert monitor.report_timer.is_running is True
+        assert monitor.report_timer._timer is not pending
+        assert pending.finished.is_set()
+    finally:
+        monitor.report_timer.stop()
