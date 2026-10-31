@@ -422,4 +422,3 @@ def test_on_message_sets_battery_capacity(commander, static_config):
     _send_number(cmd, static_config, "battery_capacity", "3000")
 
     assert cmd._dynamic_configuration.data["battery_capacity"] == 3000
-

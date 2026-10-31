@@ -426,4 +426,3 @@ def test_linked_config_converts_quoted_internal_resistance(tmp_path):
     config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
 
     assert config.static["battery"]["internal_resistance"] == 85
-

@@ -219,4 +219,3 @@ def test_discovery_includes_battery_time_remaining(homeassistant):
     assert remaining["unit_of_measurement"] == "min"
     assert remaining["device_class"] == "duration"
     assert remaining["value_template"] == "{{ value_json.battery_time_remaining }}"
-
