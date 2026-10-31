@@ -245,6 +245,11 @@ def test_linked_config_accepts_example_config(tmp_path):
             "`homeassistant.discovery_interval`",
         ),
         ("homeassistant: {expire_after: -1}\n", "`homeassistant.expire_after`"),
+        (
+            "homeassistant: {status_topic: 'homeassistant/#'}\n",
+            "`homeassistant.status_topic`",
+        ),
+        ("homeassistant: {status_online: ''}\n", "`homeassistant.status_online`"),
         ("hostname: {name: 'my pi/2'}\n", "`hostname.name`"),
         ("hostname: {name: ''}\n", "`hostname.name`"),
         ("ina: {address: 0x80}\n", "`ina.address`"),

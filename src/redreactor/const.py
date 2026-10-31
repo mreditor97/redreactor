@@ -35,3 +35,7 @@ DEFAULT_INA_I2C_BUS = 1  # I2C bus the Red Reactor is connected to
 # The log file lives on the SD card, so cap its size
 DEFAULT_LOG_MAX_BYTES = 1024 * 1024
 DEFAULT_LOG_BACKUP_COUNT = 3
+
+# Seconds to wait after Home Assistant comes online before resending the latest
+# readings, so the entities exist when the state message arrives
+HOMEASSISTANT_ONLINE_STATE_DELAY = 2.0

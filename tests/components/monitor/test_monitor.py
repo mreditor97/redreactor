@@ -85,6 +85,19 @@ def test_monitor_init_succeeds(static_config, dynamic_config, mock_ina):
     assert m is not None
 
 
+@pytest.mark.usefixtures("monitor")
+def test_homeassistant_online_resends_latest_readings():
+    """Home Assistant coming online publishes the latest readings again."""
+    from redreactor.components.mqtt import MQTT
+
+    published = []
+    MQTT.event.on("publish", lambda topic, **_: published.append(topic))
+
+    MQTT.event.emit("homeassistant_online")
+
+    assert "redreactor/redreactor/state" in published
+
+
 # ---------------------------------------------------------------------------
 # _calculate_battery_level
 # ---------------------------------------------------------------------------

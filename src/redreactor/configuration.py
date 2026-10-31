@@ -223,6 +223,7 @@ def _validate_static(configuration: dict[str, Any]) -> list[str]:
     for path, value, allow_slash in (
         ("mqtt.base_topic", mqtt["base_topic"], True),
         ("homeassistant.topic", homeassistant["topic"], True),
+        ("homeassistant.status_topic", homeassistant["status_topic"], True),
         ("hostname.name", configuration["hostname"]["name"], False),
         ("mqtt.topic.state", mqtt["topic"]["state"], False),
         ("mqtt.topic.status", mqtt["topic"]["status"], False),
@@ -236,6 +237,13 @@ def _validate_static(configuration: dict[str, Any]) -> list[str]:
             and not any(character in value for character in forbidden),
             f"must be text without {' or '.join(forbidden)}",
         )
+
+    check(
+        "homeassistant.status_online",
+        isinstance(homeassistant["status_online"], str)
+        and homeassistant["status_online"] != "",
+        "must be text",
+    )
 
     for path, value in (
         ("system.shutdown", configuration["system"]["shutdown"]),
@@ -466,6 +474,8 @@ class LinkedConfiguration:
             "homeassistant": {
                 "discovery": True,
                 "topic": "homeassistant",
+                "status_topic": "homeassistant/status",
+                "status_online": "online",
                 "discovery_interval": 120,
                 "expire_after": 120,
             },
