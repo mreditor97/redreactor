@@ -374,6 +374,8 @@ def test_linked_config_converts_quoted_new_options(tmp_path):
         ("battery: {curve: [[3.0, 0], [3.6, 101]]}", "`battery.curve`"),
         ("battery: {curve: [[3.0, 0], ['3.6', 100]]}", "`battery.curve`"),
         ("battery: {curve: 3.0}", "`battery.curve`"),
+        ("battery: {internal_resistance: -1}", "`battery.internal_resistance`"),
+        ("battery: {internal_resistance: abc}", "`battery.internal_resistance`"),
     ],
 )
 def test_linked_config_rejects_invalid_new_options(tmp_path, contents, message):
@@ -413,13 +415,15 @@ def test_linked_config_accepts_battery_curve(tmp_path):
     config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
 
     assert config.static["battery"]["curve"][1] == [3.6, 50]
+    assert config.static["battery"]["internal_resistance"] == 0
 
 
-def test_dynamic_config_resets_negative_internal_resistance(tmp_path):
-    """A negative internal resistance in the dynamic file falls back to off."""
-    dynamic_file = tmp_path / "dynamic.json"
-    dynamic_file.write_text(json.dumps({"battery_internal_resistance": -5}))
+def test_linked_config_converts_quoted_internal_resistance(tmp_path):
+    """A quoted internal resistance is read as a number."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text("battery: {internal_resistance: '85'}")
 
-    config = DynamicConfiguration(dynamic_file=str(dynamic_file))
+    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
 
-    assert config.data["battery_internal_resistance"] == 0
+    assert config.static["battery"]["internal_resistance"] == 85
+

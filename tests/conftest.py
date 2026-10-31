@@ -180,17 +180,6 @@ def static_config():
                 "mode": "box",
                 "step": 1,
             },
-            "battery_internal_resistance": {
-                "name": "battery_internal_resistance",
-                "pretty": "Battery internal resistance",
-                "type": "number",
-                "unit": "mΩ",
-                "entity_category": "diagnostic",
-                "min": 0,
-                "max": 1000,
-                "mode": "box",
-                "step": 1,
-            },
             "battery_time_remaining": {
                 "name": "battery_time_remaining",
                 "pretty": "Battery time remaining",
@@ -220,6 +209,7 @@ def static_config():
             "bus": 1,
         },
         "battery": {
+            "internal_resistance": 0,
             "curve": None,
         },
         "system": {

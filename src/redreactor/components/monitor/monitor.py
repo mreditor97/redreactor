@@ -14,6 +14,7 @@ from ina219 import INA219, DeviceRangeError
 from redreactor.components.monitor.data import MonitorData
 from redreactor.components.mqtt import MQTT
 from redreactor.const import (
+    DEFAULT_BATTERY_INTERNAL_RESISTANCE,
     DEFAULT_BATTERY_VOLTAGE_HEADROOM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
@@ -362,11 +363,16 @@ class Monitor:
         its charge. Otherwise a straight line between the minimum and maximum
         voltage is used.
         """
-        resting_voltage = voltage + (
-            current / 1000 * self.data.battery_internal_resistance / 1000
+        battery_configuration = self._static_configuration.get("battery", {})
+        internal_resistance = float(
+            battery_configuration.get(
+                "internal_resistance",
+                DEFAULT_BATTERY_INTERNAL_RESISTANCE,
+            ),
         )
+        resting_voltage = voltage + current / 1000 * internal_resistance / 1000
 
-        curve = self._static_configuration.get("battery", {}).get("curve")
+        curve = battery_configuration.get("curve")
         if curve:
             return round(self._interpolate_battery_curve(curve, resting_voltage))
 
@@ -553,7 +559,6 @@ class Monitor:
                     f"{self._static_configuration['fields']['report_interval']['name']}": self.data.report_interval,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_runtime_limit']['name']}": self.data.battery_runtime_limit,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_capacity']['name']}": self.data.battery_capacity,  # noqa: E501
-                    f"{self._static_configuration['fields']['battery_internal_resistance']['name']}": self.data.battery_internal_resistance,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_time_remaining']['name']}": self.data.battery_time_remaining,  # noqa: E501
                 },
             ),
@@ -594,11 +599,6 @@ class Monitor:
         # Update Battery Capacity
         self.data.battery_capacity = int(
             self._dynamic_configuration.data["battery_capacity"],
-        )
-
-        # Update Battery Internal Resistance
-        self.data.battery_internal_resistance = int(
-            self._dynamic_configuration.data["battery_internal_resistance"],
         )
 
         if self.report_timer:

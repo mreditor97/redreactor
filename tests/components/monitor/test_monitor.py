@@ -145,7 +145,7 @@ def test_battery_level_without_resistance_ignores_current(monitor):
 
 def test_battery_level_corrects_for_discharge_sag(monitor):
     """V + I x R: 500mA through 100mOhm adds back 0.05V."""
-    monitor.data.battery_internal_resistance = 100
+    monitor._static_configuration["battery"]["internal_resistance"] = 100
 
     assert monitor._calculate_battery_level(3.5, 500.0) == (
         monitor._calculate_battery_level(3.55)
@@ -154,7 +154,7 @@ def test_battery_level_corrects_for_discharge_sag(monitor):
 
 def test_battery_level_corrects_for_charging_rise(monitor):
     """Charging current is negative, so the rise in voltage is taken off."""
-    monitor.data.battery_internal_resistance = 100
+    monitor._static_configuration["battery"]["internal_resistance"] = 100
 
     assert monitor._calculate_battery_level(3.55, -500.0) == (
         monitor._calculate_battery_level(3.5)
@@ -175,7 +175,7 @@ def test_battery_level_follows_curve(monitor, static_config, voltage, level):
 def test_battery_level_curve_uses_corrected_voltage(monitor, static_config):
     """The load correction is applied before the curve is looked up."""
     static_config["battery"]["curve"] = TEST_CURVE
-    monitor.data.battery_internal_resistance = 100
+    monitor._static_configuration["battery"]["internal_resistance"] = 100
 
     # 3.25V + 500mA x 100mOhm = 3.3V, a quarter of the way up the curve
     assert monitor._calculate_battery_level(3.25, 500.0) == 25
@@ -183,8 +183,7 @@ def test_battery_level_curve_uses_corrected_voltage(monitor, static_config):
 
 def test_monitor_uses_current_for_battery_level(monitor, mock_ina):
     """The monitor loop passes the measured current into the level."""
-    monitor.data.battery_internal_resistance = 100
-    monitor._dynamic_configuration.data["battery_internal_resistance"] = 100
+    monitor._static_configuration["battery"]["internal_resistance"] = 100
 
     with patch.object(monitor, "_update"):
         _run_monitor_with_ina(monitor, mock_ina, 3.5, 500.0)
@@ -196,7 +195,7 @@ def test_monitor_range_error_level_is_not_corrected(monitor, mock_ina):
     """On a range error the real current is unknown, so no correction is made."""
     from ina219 import DeviceRangeError
 
-    monitor._dynamic_configuration.data["battery_internal_resistance"] = 100
+    monitor._static_configuration["battery"]["internal_resistance"] = 100
     mock_ina.voltage.return_value = 3.5
     mock_ina.current.side_effect = DeviceRangeError(6000)
 

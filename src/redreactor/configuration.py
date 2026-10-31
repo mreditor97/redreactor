@@ -71,6 +71,7 @@ def _convert_quoted_values(configuration: dict[str, Any]) -> None:
         ("ina", "shunt_ohms"),
         ("ina", "max_expected_amps"),
         ("ina", "bus"),
+        ("battery", "internal_resistance"),
     ):
         value = configuration[section][key]
         if isinstance(value, str):
@@ -193,6 +194,12 @@ def _validate_static(configuration: dict[str, Any]) -> list[str]:
     ):
         check(path, _is_number(value) and value > 0, "must be a number above 0")
     check(
+        "battery.internal_resistance",
+        _is_number(configuration["battery"]["internal_resistance"])
+        and configuration["battery"]["internal_resistance"] >= 0,
+        "must be a number of milliohms, 0 or more",
+    )
+    check(
         "homeassistant.expire_after",
         _is_number(homeassistant["expire_after"])
         and homeassistant["expire_after"] >= 0,
@@ -308,7 +315,6 @@ class DynamicConfiguration:
             "battery_voltage_maximum": DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
             "battery_runtime_limit": DEFAULT_BATTERY_RUNTIME_LIMIT,
             "battery_capacity": DEFAULT_BATTERY_CAPACITY,
-            "battery_internal_resistance": DEFAULT_BATTERY_INTERNAL_RESISTANCE,
         }
 
         dynamic_path = Path(self._dynamic_file)
@@ -340,7 +346,7 @@ class DynamicConfiguration:
         # Older versions stored received values without checking them, so a
         # non-numeric value would stop the service from ever starting again. A
         # report interval of 0 or less would spin the report timer, and a
-        # negative runtime limit, capacity or resistance is meaningless.
+        # negative runtime limit or capacity is meaningless.
         for key, default in dynamic_file_defaults.items():
             value = data[key]
             if (
@@ -348,7 +354,6 @@ class DynamicConfiguration:
                 or (key == "report_interval" and value <= 0)
                 or (key == "battery_runtime_limit" and value < 0)
                 or (key == "battery_capacity" and value < 0)
-                or (key == "battery_internal_resistance" and value < 0)
             ):
                 logger.warning(
                     "Invalid %s value %r in %s, using the default %s",
@@ -596,17 +601,6 @@ class LinkedConfiguration:
                     "mode": "box",
                     "step": 1,
                 },
-                "battery_internal_resistance": {
-                    "name": "battery_internal_resistance",
-                    "pretty": "Battery internal resistance",
-                    "type": "number",
-                    "unit": "mΩ",
-                    "entity_category": "diagnostic",
-                    "min": 0,
-                    "max": 1000,
-                    "mode": "box",
-                    "step": 1,
-                },
                 "battery_time_remaining": {
                     "name": "battery_time_remaining",
                     "pretty": "Battery time remaining",
@@ -636,6 +630,8 @@ class LinkedConfiguration:
                 "bus": DEFAULT_INA_I2C_BUS,
             },
             "battery": {
+                # Milliohms, used to correct the voltage for the sag under load
+                "internal_resistance": DEFAULT_BATTERY_INTERNAL_RESISTANCE,
                 # Pairs of [resting voltage, battery level %], None uses a
                 # straight line between the minimum and maximum voltage
                 "curve": None,

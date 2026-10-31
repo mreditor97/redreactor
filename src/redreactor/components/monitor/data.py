@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from redreactor.const import (
     DEFAULT_BATTERY_CAPACITY,
-    DEFAULT_BATTERY_INTERNAL_RESISTANCE,
     DEFAULT_BATTERY_RUNTIME_LIMIT,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MINIMUM,
@@ -31,7 +30,6 @@ class MonitorData:
     report_interval: int
     battery_runtime_limit: int
     battery_capacity: int
-    battery_internal_resistance: int
     battery_time_remaining: float | None
 
     def __init__(  # noqa: PLR0913, PLR0917
@@ -51,7 +49,6 @@ class MonitorData:
         report_interval: int = DEFAULT_REPORT_INTERVAL,
         battery_runtime_limit: int = DEFAULT_BATTERY_RUNTIME_LIMIT,
         battery_capacity: int = DEFAULT_BATTERY_CAPACITY,
-        battery_internal_resistance: int = DEFAULT_BATTERY_INTERNAL_RESISTANCE,
         battery_time_remaining: float | None = None,
     ) -> None:
         """Initialise Monitor Data."""
@@ -70,5 +67,4 @@ class MonitorData:
         self.report_interval = report_interval
         self.battery_runtime_limit = battery_runtime_limit
         self.battery_capacity = battery_capacity
-        self.battery_internal_resistance = battery_internal_resistance
         self.battery_time_remaining = battery_time_remaining
