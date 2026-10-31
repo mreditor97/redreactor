@@ -6,6 +6,7 @@ import json
 import logging
 import sys
 import time
+from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 from ina219 import INA219, DeviceRangeError
@@ -92,6 +93,13 @@ class Monitor:
     # Whether the first reading after start up has been checked
     _start_up_checked: bool = False
 
+    # Whether the INA219 has been read at least once since start up
+    _has_reading: bool = False
+
+    # Set when MQTT connects before the first reading, so that reading is
+    # reported as soon as it is taken
+    _report_pending: bool = False
+
     # time.monotonic() when external power was lost, None while it is present
     _on_battery_since: float | None = None
 
@@ -121,6 +129,11 @@ class Monitor:
         )
         self._static_configuration = static_configuration
         self._dynamic_configuration = dynamic_configuration
+        self._has_reading = False
+        self._report_pending = False
+        # Guards the two flags above, which the MQTT thread and the monitor
+        # timer thread both use
+        self._report_lock = Lock()
 
         # Register Dynamic Configuration update listener
         self._dynamic_configuration.event.on(event_name="write", function=self._update)
@@ -241,6 +254,9 @@ class Monitor:
             self._start_up_checked = True
             self._check_start_up_charge()
 
+        if ina:
+            self._report_if_pending()
+
         if (
             self.data.battery_level <= float(self.data.battery_warning_threshold)
             and not self.data.external_power
@@ -276,6 +292,16 @@ class Monitor:
 
             # Emit the shutdown event
             self.event.emit("shutdown")
+
+    def _report_if_pending(self) -> None:
+        """Report the first reading if MQTT connected before it was taken."""
+        with self._report_lock:
+            self._has_reading = True
+            pending = self._report_pending
+            self._report_pending = False
+
+        if pending:
+            self._update()
 
     def _check_start_up_charge(self) -> None:
         """Check the battery is charging if it starts below the warning threshold.
@@ -476,6 +502,11 @@ class Monitor:
                     f"{self._static_configuration['fields']['battery_runtime_limit']['name']}": self.data.battery_runtime_limit,  # noqa: E501
                 },
             ),
+            # Retained so Home Assistant gets the latest readings as soon as
+            # it subscribes, after discovery or its own restart, instead of
+            # waiting for the next report. The status topic's Last Will marks
+            # them unavailable if this device drops off.
+            retain=True,
         )
 
     def _update_dynamic_configuration(self) -> None:
@@ -511,8 +542,9 @@ class Monitor:
         )
 
         if self.report_timer:
-            # Update Monitor timer interval
-            self.report_timer.interval = self.data.report_interval
+            # Apply the new report interval straight away, rather than after
+            # the tick that is already waiting on the old interval
+            self.report_timer.set_interval(self.data.report_interval)
 
     def _mqtt_on_connect(
         self,
@@ -524,6 +556,17 @@ class Monitor:
     ) -> None:
         """On MQTT Connect.
 
-        Start the reporting timer.
+        Report straight away, or as soon as the first reading is taken if it
+        hasn't been yet, rather than waiting a whole report interval. Then
+        (re)start the report timer so the next report follows a full interval
+        after this one, including after a reconnect.
         """
+        with self._report_lock:
+            report_now = self._has_reading
+            self._report_pending = not report_now
+
+        if report_now:
+            self._update()
+
+        self.report_timer.stop()
         self.report_timer.start()
