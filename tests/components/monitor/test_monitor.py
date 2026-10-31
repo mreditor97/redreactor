@@ -630,3 +630,79 @@ def test_report_interval_change_restarts_report_timer(monitor, dynamic_config):
         assert pending.finished.is_set()
     finally:
         monitor.report_timer.stop()
+
+
+# ---------------------------------------------------------------------------
+# Reporting on MQTT connect
+# ---------------------------------------------------------------------------
+
+
+def _state_publishes(static_config):
+    """Collect publishes to the state topic."""
+    from redreactor.components.mqtt import MQTT
+
+    topic = (
+        f"{static_config['mqtt']['base_topic']}/{static_config['hostname']['name']}/"
+        f"{static_config['mqtt']['topic']['state']}"
+    )
+    calls = []
+    MQTT.event.on(
+        "publish",
+        lambda **kwargs: calls.append(kwargs) if kwargs["topic"] == topic else None,
+    )
+    return calls
+
+
+def test_connect_after_first_reading_reports_immediately(
+    monitor,
+    mock_ina,
+    static_config,
+):
+    """Connecting once a reading exists publishes it without waiting."""
+    monitor._monitor(ina=mock_ina)
+    published = _state_publishes(static_config)
+
+    try:
+        monitor._mqtt_on_connect(None, None, None, None)
+        assert len(published) == 1
+        assert published[0]["retain"] is True
+        assert monitor.report_timer.is_running is True
+    finally:
+        monitor.report_timer.stop()
+
+
+def test_connect_before_first_reading_reports_on_first_reading(
+    monitor,
+    mock_ina,
+    static_config,
+):
+    """Connecting before any reading reports as soon as the reading is taken."""
+    published = _state_publishes(static_config)
+
+    try:
+        monitor._mqtt_on_connect(None, None, None, None)
+        assert published == []
+
+        monitor._monitor(ina=mock_ina)
+        assert len(published) == 1
+
+        # Later readings go back to the report interval
+        monitor._monitor(ina=mock_ina)
+        assert len(published) == 1
+    finally:
+        monitor.report_timer.stop()
+
+
+def test_reconnect_restarts_report_timer(monitor, mock_ina):
+    """A reconnect reschedules the next report a full interval from now."""
+    monitor._monitor(ina=mock_ina)
+    monitor.report_timer.start()
+    pending = monitor.report_timer._timer
+
+    try:
+        monitor._mqtt_on_connect(None, None, None, None)
+        assert monitor.report_timer.is_running is True
+        assert monitor.report_timer._timer is not pending
+        assert pending.finished.is_set()
+    finally:
+        monitor.report_timer.stop()
