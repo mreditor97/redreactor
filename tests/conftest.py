@@ -157,18 +157,6 @@ def static_config():
                 "mode": "box",
                 "step": 5,
             },
-            "battery_runtime_limit": {
-                "name": "battery_runtime_limit",
-                "pretty": "Battery runtime limit",
-                "type": "number",
-                "unit": "min",
-                "device_class": "duration",
-                "entity_category": "diagnostic",
-                "min": 0,
-                "max": 1440,
-                "mode": "box",
-                "step": 1,
-            },
             "restart": {
                 "name": "restart",
                 "pretty": "Restart",

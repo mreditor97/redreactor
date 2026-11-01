@@ -468,75 +468,12 @@ def test_start_up_above_shutdown_level_logs_nothing(monitor, mock_ina, caplog):
 
 
 # ---------------------------------------------------------------------------
-# Battery runtime limit
-# ---------------------------------------------------------------------------
-
-
-def test_runtime_limit_disabled_by_default(monitor, mock_ina):
-    """With the default limit of 0, time on battery never shuts down."""
-    shutdown_called = _shutdown_events(monitor)
-
-    with (
-        patch.object(monitor, "_update"),
-        patch("redreactor.components.monitor.monitor.time.monotonic") as monotonic,
-    ):
-        monotonic.return_value = 0
-        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
-        monotonic.return_value = 24 * 60 * 60
-        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
-
-    assert not shutdown_called
-
-
-def test_runtime_limit_shuts_down_after_limit(monitor, mock_ina, dynamic_config):
-    """On battery for longer than the limit, it shuts down at any charge."""
-    dynamic_config.data["battery_runtime_limit"] = 10
-    shutdown_called = _shutdown_events(monitor)
-
-    with (
-        patch.object(monitor, "_update"),
-        patch("redreactor.components.monitor.monitor.time.monotonic") as monotonic,
-    ):
-        monotonic.return_value = 1000
-        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
-        monotonic.return_value = 1000 + 9 * 60
-        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
-        assert not shutdown_called
-
-        monotonic.return_value = 1000 + 10 * 60
-        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
-
-    assert shutdown_called
-
-
-def test_runtime_limit_resets_when_power_returns(monitor, mock_ina, dynamic_config):
-    """External power returning restarts the runtime count."""
-    dynamic_config.data["battery_runtime_limit"] = 10
-    shutdown_called = _shutdown_events(monitor)
-
-    with (
-        patch.object(monitor, "_update"),
-        patch("redreactor.components.monitor.monitor.time.monotonic") as monotonic,
-    ):
-        monotonic.return_value = 0
-        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
-        monotonic.return_value = 9 * 60
-        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, -50.0)
-        monotonic.return_value = 10 * 60
-        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
-        monotonic.return_value = 15 * 60
-        _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
-
-    assert not shutdown_called
-
-
-# ---------------------------------------------------------------------------
 # Published state and INA219 setup
 # ---------------------------------------------------------------------------
 
 
 def test_state_payload_includes_new_fields(monitor, mock_ina):
-    """Power, charging and the runtime limit are published."""
+    """Power and charging are published."""
     import json
 
     from redreactor.components.mqtt import MQTT
@@ -553,7 +490,6 @@ def test_state_payload_includes_new_fields(monitor, mock_ina):
     state = json.loads(published["redreactor/redreactor/state"])
     assert state["power"] == 1.234
     assert state["charging"] == "ON"
-    assert state["battery_runtime_limit"] == 0
 
 
 def test_ina_uses_configured_bus(static_config, dynamic_config, mock_ina):
