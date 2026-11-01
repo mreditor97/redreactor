@@ -310,3 +310,54 @@ def test_on_command_invalid_raises_value_error(commander):
 
     with pytest.raises(ValueError, match="Invalid device command"):
         cmd._on_command("invalid")
+
+
+def test_on_message_ignores_topics_outside_the_set_prefix(commander):
+    """Messages for other components (e.g. HA's birth message) are not commands."""
+    cmd, _ = commander
+    msg = _make_mock_message("homeassistant/status", "online")
+
+    with patch.object(cmd.logger, "warning") as mock_warn:
+        cmd._on_message(None, None, msg)
+
+    mock_warn.assert_not_called()
+
+
+def test_on_command_logs_failed_system_command(commander):
+    """A failing shutdown command is logged rather than silently ignored."""
+    cmd, _ = commander
+    from redreactor.components.mqtt import MQTT
+
+    MQTT.event.on("publish", lambda **_: None)
+
+    target = "redreactor.components.commander.commander.subprocess.run"
+    with (
+        patch(target) as mock_run,
+        patch("time.sleep"),
+        patch.object(cmd.logger, "error") as mock_error,
+    ):
+        mock_run.return_value.returncode = 1
+        cmd._on_command("shutdown")
+
+    mock_error.assert_called_once()
+
+
+def test_on_command_logs_missing_system_command(commander):
+    """A system command that can't be started is logged, then still disconnects."""
+    cmd, _ = commander
+    from redreactor.components.mqtt import MQTT
+
+    MQTT.event.on("publish", lambda **_: None)
+    disconnect_calls: list[bool] = []
+    MQTT.event.on("disconnect", lambda: disconnect_calls.append(True))
+
+    target = "redreactor.components.commander.commander.subprocess.run"
+    with (
+        patch(target, side_effect=FileNotFoundError("sudo")),
+        patch("time.sleep"),
+        patch.object(cmd.logger, "exception") as mock_exception,
+    ):
+        cmd._on_command("shutdown")
+
+    mock_exception.assert_called_once()
+    assert disconnect_calls == [True]

@@ -147,3 +147,35 @@ def test_dynamic_config_resets_inverted_voltage_range(tmp_path):
 
     assert config.data["battery_voltage_minimum"] == DEFAULT_BATTERY_VOLTAGE_MINIMUM
     assert config.data["battery_voltage_maximum"] == DEFAULT_BATTERY_VOLTAGE_MAXIMUM
+
+
+def test_dynamic_config_write_replaces_file_atomically(tmp_path):
+    """write() leaves only the complete file behind, no temporary file."""
+    dynamic_file = tmp_path / "dynamic.json"
+    config = DynamicConfiguration(dynamic_file=str(dynamic_file))
+
+    config.data["report_interval"] = 60
+    config.write()
+
+    assert json.loads(dynamic_file.read_text())["report_interval"] == 60
+    assert [path.name for path in tmp_path.iterdir()] == ["dynamic.json"]
+
+
+def test_linked_config_client_id_defaults_to_hostname(tmp_path):
+    """Without a configured client_id, each hostname gets its own MQTT client ID."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text(yaml.dump({"hostname": {"name": "garage-pi"}}))
+
+    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+
+    assert config.static["mqtt"]["client_id"] == "redreactor-garage-pi"
+
+
+def test_linked_config_keeps_configured_client_id(tmp_path):
+    """A configured client_id is used as given."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text(yaml.dump({"mqtt": {"client_id": "my-client"}}))
+
+    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+
+    assert config.static["mqtt"]["client_id"] == "my-client"

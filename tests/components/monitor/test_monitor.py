@@ -11,6 +11,7 @@ from redreactor.const import (
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
     DEFAULT_BATTERY_VOLTAGE_MINIMUM,
+    DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS,
 )
 from redreactor.helpers.emitter import EventEmitter
 
@@ -196,7 +197,8 @@ def test_monitor_battery_zero_no_external_power_emits_shutdown(monitor, mock_ina
     monitor.event.on("shutdown", lambda: shutdown_called.append(True))
 
     with patch.object(monitor, "_update"):
-        monitor._monitor(ina=mock_ina)
+        for _ in range(DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS):
+            monitor._monitor(ina=mock_ina)
 
     assert shutdown_called, "shutdown event was not emitted"
 
@@ -231,7 +233,27 @@ def test_monitor_inverted_voltage_range_still_shuts_down(
     monitor.event.on("shutdown", lambda: shutdown_called.append(True))
 
     with patch.object(monitor, "_update"):
-        monitor._monitor(ina=mock_ina)
+        for _ in range(DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS):
+            monitor._monitor(ina=mock_ina)
 
     assert monitor.data.battery_level == 0
     assert shutdown_called, "shutdown event was not emitted"
+
+
+def test_monitor_single_empty_reading_does_not_shut_down(monitor, mock_ina):
+    """One 0% reading (e.g. a voltage sag under load) does not shut down."""
+    mock_ina.current.return_value = 500.0
+    shutdown_called = []
+    monitor.event.on("shutdown", lambda: shutdown_called.append(True))
+
+    with patch.object(monitor, "_update"):
+        for _ in range(DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS - 1):
+            mock_ina.voltage.return_value = DEFAULT_BATTERY_VOLTAGE_MINIMUM
+            monitor._monitor(ina=mock_ina)
+        # Recovers above 0%, which resets the count
+        mock_ina.voltage.return_value = 3.7
+        monitor._monitor(ina=mock_ina)
+        mock_ina.voltage.return_value = DEFAULT_BATTERY_VOLTAGE_MINIMUM
+        monitor._monitor(ina=mock_ina)
+
+    assert not shutdown_called

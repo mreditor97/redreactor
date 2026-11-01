@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
 from pathlib import Path
 from typing import Any
 
@@ -107,9 +108,18 @@ class DynamicConfiguration:
         return data
 
     def write(self) -> None:
-        """Write dynamic configuration file."""
-        with Path(self._dynamic_file).open("w") as file:
+        """Write dynamic configuration file.
+
+        Written to a temporary file and then renamed over the original, so a
+        power cut part way through can't leave a truncated file behind.
+        """
+        dynamic_path = Path(self._dynamic_file)
+        temporary_path = dynamic_path.with_name(f"{dynamic_path.name}.tmp")
+        with temporary_path.open("w") as file:
             json.dump(self.data, file)
+            file.flush()
+            os.fsync(file.fileno())
+        temporary_path.replace(dynamic_path)
 
 
 class LinkedConfiguration:
@@ -137,13 +147,12 @@ class LinkedConfiguration:
         with Path(self._static_file).open() as static_file:
             static_file_override = yaml.safe_load(static_file)
 
-        static_file_defaults = {
+        static_file_defaults: dict[str, Any] = {
             "mqtt": {
                 "broker": "127.0.0.1",
                 "port": 1883,
                 "user": "test",
                 "password": "test",
-                "client_id": "Red Reactor",
                 "base_topic": "redreactor",
                 "version": 3,
                 "transport": "tcp",
@@ -298,4 +307,11 @@ class LinkedConfiguration:
 
         # Overwritten any different values with the ones that came from the static file
         dict_merge(static_file_defaults, static_file_override)
+
+        # MQTT brokers disconnect a client when another connects with the same
+        # ID, so default to one that is unique per configured hostname
+        static_file_defaults["mqtt"].setdefault(
+            "client_id",
+            f"redreactor-{static_file_defaults['hostname']['name']}",
+        )
         return static_file_defaults

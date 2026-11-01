@@ -16,7 +16,7 @@ from .number import Number
 from .sensor import Sensor
 
 if TYPE_CHECKING:
-    from paho.mqtt.client import Client
+    from paho.mqtt.client import Client, MQTTMessage
 
     from redreactor.configuration import DynamicConfiguration
 
@@ -46,21 +46,11 @@ class Homeassistant:
 
         # Register MQTT listeners
         MQTT.event.on(event_name="on_connect", function=self._mqtt_on_connect)
-
-        # Register Dynamic Configuration update listener
-        self._dynamic_configuration.event.on(
-            event_name="write",
-            function=self._update_homeassistant_timer,
-        )
+        MQTT.event.on(event_name="on_message", function=self._mqtt_on_message)
 
         # Push a configuration update at a repeated interval
         self.configuration_report_timer = RepeatTimer(
-            float(
-                self._dynamic_configuration.data[
-                    self._static_configuration["fields"]["report_interval"]["name"]
-                ],
-            )
-            * 4,
+            float(self._static_configuration["homeassistant"]["discovery_interval"]),
             self._update_homeassistant_configuration,
         )
 
@@ -171,21 +161,36 @@ class Homeassistant:
                 ),
             )
 
-    def _update_homeassistant_timer(self) -> None:
-        """Update Home Assistant configuration update timer."""
-        # Update configuration report interval timer
-        self.configuration_report_timer.interval = float(
-            self._static_configuration["homeassistant"]["discovery_interval"],
-        )
+    @property
+    def _birth_topic(self) -> str:
+        """Topic Home Assistant publishes its birth message to."""
+        return f"{self._static_configuration['homeassistant']['topic']}/status"
 
     def _mqtt_on_connect(
         self,
-        _client: Client,
+        client: Client,
         _userdata: Any,
         _flags: Any,
-        _rc: Any,
-        _reasoncode: Any = None,
+        _reason_code: Any,
+        _properties: Any = None,
     ) -> None:
         """On MQTT Connect, publish Home Assistant configuration."""
         self._update_homeassistant_configuration()
         self.configuration_report_timer.start()
+        # Home Assistant announces itself here when it (re)starts, so the
+        # discovery configuration can be sent again straight away
+        client.subscribe(topic=self._birth_topic)
+
+    def _mqtt_on_message(
+        self,
+        _client: Client,
+        _userdata: Any,
+        message: MQTTMessage,
+    ) -> None:
+        """Republish discovery when Home Assistant comes online."""
+        if (
+            message.topic == self._birth_topic
+            and message.payload.decode("utf-8", errors="replace") == "online"
+        ):
+            self.logger.info("Home Assistant is online, publishing discovery")
+            self._update_homeassistant_configuration()

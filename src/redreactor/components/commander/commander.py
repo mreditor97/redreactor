@@ -63,8 +63,8 @@ class Commander:
         client: Client,
         _userdata: Any,
         _flags: Any,
-        _rc: Any,
-        _reasoncode: Any = None,
+        _reason_code: Any,
+        _properties: Any = None,
     ) -> None:
         """Process Commander subscriptions on MQTT connect event."""
         # Loop through all available field options
@@ -95,11 +95,22 @@ class Commander:
         message: MQTTMessage,
     ) -> None:
         """Process Commander messages on MQTT message event."""
-        # Remove the start of the topic to leave the command
-        topic = str(message.topic).replace(
-            f"{self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['set']}/",
-            "",
+        prefix = "/".join(
+            (
+                self._static_configuration["mqtt"]["base_topic"],
+                self._static_configuration["hostname"]["name"],
+                self._static_configuration["mqtt"]["topic"]["set"],
+                "",
+            ),
         )
+
+        # Other components subscribe to their own topics, which are not
+        # commands for us
+        if not str(message.topic).startswith(prefix):
+            return
+
+        # Remove the start of the topic to leave the command
+        topic = str(message.topic).removeprefix(prefix)
 
         # Convert the received command into readable JSON
         try:
@@ -255,7 +266,18 @@ class Commander:
         # The shutdown/restart command comes from the trusted YAML config, not
         # from the MQTT payload, so splitting with shlex (shell=False) is safe.
         cmd = shlex.split(self._static_configuration["system"][event_type])
-        subprocess.run(cmd, check=False)  # noqa: S603
+        try:
+            result = subprocess.run(cmd, check=False)  # noqa: S603
+        except OSError:
+            self.logger.exception("Unable to run the %s command %s", event_type, cmd)
+        else:
+            if result.returncode != 0:
+                self.logger.error(
+                    "The %s command %s failed with exit code %i",
+                    event_type,
+                    cmd,
+                    result.returncode,
+                )
 
         # This runs on a worker or timer thread, where sys.exit() would only end
         # that thread. Disconnecting makes loop_forever() return in the main
