@@ -17,8 +17,12 @@ DEFAULT_BATTERY_VOLTAGE_HEADROOM = 0.05
 # Battery capacity in mAh, used to estimate the time remaining, 0 means not set
 DEFAULT_BATTERY_CAPACITY = 0
 # Battery internal resistance in milliohms, used to correct the voltage for the
-# sag under load before working out the battery level, 0 turns it off
-DEFAULT_BATTERY_INTERNAL_RESISTANCE = 0.0
+# sag under load before working out the battery level, 0 turns it off. The
+# default is the Samsung INR18650-35E datasheet's maximum initial AC impedance.
+# The real resistance (holder, wiring, board) is usually higher, so this tends
+# to under-correct, which keeps the level and low battery shutdown on the safe
+# side rather than reporting more charge than there is.
+DEFAULT_BATTERY_INTERNAL_RESISTANCE = 35.0
 # Monitor readings averaged for the battery level, as brief current spikes make
 # single readings jump. 6 readings at the default 5 second interval is 30 seconds
 DEFAULT_BATTERY_AVERAGE_READINGS = 6

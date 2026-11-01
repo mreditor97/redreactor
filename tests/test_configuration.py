@@ -395,7 +395,7 @@ def test_linked_config_accepts_battery_curve(tmp_path):
     config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
 
     assert config.static["battery"]["curve"][1] == [3.6, 50]
-    assert config.static["battery"]["internal_resistance"] == 0
+    assert config.static["battery"]["internal_resistance"] == 35
     assert config.static["battery"]["average_readings"] == 6
 
 

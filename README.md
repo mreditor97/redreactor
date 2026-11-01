@@ -123,7 +123,7 @@ Command topic | value:
       insecure: false # true skips the hostname check, for testing only
   ```
 
-- `battery.internal_resistance` is the battery's internal resistance in mΩ (default `0`, off), see [Battery level](#battery-level)
+- `battery.internal_resistance` is the battery's internal resistance in mΩ (default `35`, `0` turns it off), see [Battery level](#battery-level)
 - `battery.average_readings` is how many monitor readings are averaged for `battery_level` (default `6`, 30 seconds at the default `ina.monitor_interval`, `1` turns it off), see [Battery level](#battery-level)
 - `battery.curve` maps the battery's resting voltage to its level, see [Battery level](#battery-level)
 - `fields.<field>.default_entity_id` sets the entity ID Home Assistant creates the entity with, for example `sensor.ups_voltage`. The older `object_id` option still works but is deprecated by Home Assistant
@@ -132,12 +132,12 @@ Command topic | value:
 
 By default `battery_level` is a straight line from `battery_voltage_minimum` (0%) to `battery_voltage_maximum` (100%). A Li-ion battery's voltage doesn't fall evenly as it discharges, and it sags further the more current is drawn, so the level can jump around under load. The level is worked out from the average of the last `battery.average_readings` readings (6 by default), which smooths out brief current spikes, as the Red Reactor manual recommends. Two more settings improve it:
 
-1. **Internal resistance** (`battery.internal_resistance` in the configuration file). The voltage sags under load by about current × resistance, so that is added back before working out the level (and taken off while charging). With the Pi idle, note the voltage and current, then put it under load (for example `stress -c 4`) and note them again. The resistance in mΩ is the voltage drop in mV divided by the current rise in A. This includes the holder, wiring and board as well as the cell, so it is usually higher than the datasheet figure. With two cells in parallel, measure them together; the result is the combined resistance.
+1. **Internal resistance** (`battery.internal_resistance` in the configuration file). The voltage sags under load by about current × resistance, so that is added back before working out the level (and taken off while charging). With the Pi idle, note the voltage and current, then put it under load (for example `stress -c 4`) and note them again. The resistance in mΩ is the voltage drop in mV divided by the current rise in A. This includes the holder, wiring and board as well as the cell, so it is usually higher than the datasheet figure. The default of 35 mΩ is the maximum initial AC impedance in the Samsung INR18650-35E datasheet; as the real value is usually higher, the default under-corrects, which errs towards shutting down early rather than late. With two cells in parallel, measure them together; the result is the combined resistance.
 2. **Voltage curve** (`battery.curve` in the configuration file). Pairs of `[resting voltage, level %]`, with rising voltages. The level is interpolated between them, and the ends are clamped. When a curve is set, `battery_voltage_minimum` and `battery_voltage_maximum` no longer affect the level.
 
    ```yaml
    battery:
-     internal_resistance: 0 # mΩ, your measured value
+     internal_resistance: 35 # mΩ, your measured value
      average_readings: 6
      curve:
        - [3.00, 0]
