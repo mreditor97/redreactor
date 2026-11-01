@@ -97,8 +97,8 @@ jobs:
         run: |
           poetry config virtualenvs.create true
           poetry config virtualenvs.in-project true
-      - name: 🏗 Install dependencies
-        run: poetry install --no-interaction
+      # Building the package needs only Poetry, not the project's
+      # dependencies, some of which have no wheels for the newest Python yet
       - name: 🏗 Set package version
         env:
           VERSION: ${{ needs.information.outputs.version }}
