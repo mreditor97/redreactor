@@ -2,17 +2,12 @@
 name = "redreactor"
 version = "0.0.0"
 description = "Red Reactor Battery Monitoring service with MQTT, and Home Assistant support"
-documentation = "https://github.com/mreditor97/redreactor"
-repository = "https://github.com/mreditor97/redreactor"
-homepage = "https://github.com/mreditor97/redreactor"
 authors = [
   { name = "MrEditor97", email = "dev@mreditor97.co.uk" },
 ]
 license = "MIT"
+license-files = ["LICENSE"]
 readme = { file = "README.md", content-type = "text/markdown" }
-packages = [
-  { include = "redreactor", from = "src"},
-]
 requires-python = ">=3.11"
 dependencies = [
   "pi-ina219 >= 1.4.1",
@@ -21,29 +16,34 @@ dependencies = [
 ]
 
 [project.urls]
+Homepage = "https://github.com/mreditor97/redreactor"
+Documentation = "https://github.com/mreditor97/redreactor"
+Repository = "https://github.com/mreditor97/redreactor"
 "Bug Tracker" = "https://github.com/mreditor97/redreactor/issues"
 Changelog = "https://github.com/mreditor97/redreactor/releases"
 
-[tool.poetry.group.dev.dependencies]
-aresponses = "3.0.0"
-black = "26.10.1"
-blacken-docs = "1.20.0"
-codespell = "2.4.3"
-covdefaults = "2.3.0"
-coverage = {version = "7.17.0", extras = ["toml"]}
-mypy = "2.4.1"
-pre-commit = "4.7.0"
-pre-commit-hooks = "6.0.0"
-pylint = "4.1.3"
-pytest = "9.2.0"
-pytest-asyncio = "1.4.1.post1"
-pytest-cov = "7.1.0"
-ruff = "0.17.3"
-safety = "3.8.1"
-types-cachetools = "^5.3.0"
-yamllint = "1.38.0"
-types-pyyaml = "^6.0.12.10"
-types-requests = "2.33.0.20261030"
+[dependency-groups]
+dev = [
+  "aresponses==3.0.0",
+  "black==26.10.1",
+  "blacken-docs==1.20.0",
+  "codespell==2.4.3",
+  "covdefaults==2.3.0",
+  "coverage[toml]==7.17.0",
+  "mypy==2.4.1",
+  "pre-commit==4.7.0",
+  "pre-commit-hooks==6.0.0",
+  "pylint==4.1.3",
+  "pytest==9.2.0",
+  "pytest-asyncio==1.4.1.post1",
+  "pytest-cov==7.1.0",
+  "ruff==0.17.3",
+  "safety==3.8.1",
+  "types-cachetools>=5.3.0,<6",
+  "yamllint==1.38.0",
+  "types-pyyaml>=6.0.12.10,<7",
+  "types-requests==2.33.0.20261030",
+]
 
 [tool.coverage.run]
 plugins = ["covdefaults"]
@@ -172,5 +172,5 @@ known-first-party = ["redreactor"]
 max-complexity = 25
 
 [build-system]
-build-backend = "poetry.core.masonry.api"
-requires = ["poetry-core>=1.0.0"]
+build-backend = "uv_build"
+requires = ["uv_build>=0.13.6,<0.14"]
