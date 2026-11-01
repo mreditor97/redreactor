@@ -60,3 +60,41 @@ def test_start_twice_is_idempotent():
     timer.stop()
     # The timer should have been started only once (idempotent)
     assert timer.is_running is False
+
+
+def test_stop_before_start_is_safe():
+    """stop() on a timer that never started does not raise."""
+    timer = RepeatTimer(60, lambda: None)
+    timer.stop()
+    assert timer.is_running is False
+
+
+def test_set_interval_applies_immediately():
+    """Shortening the interval does not wait out the old, longer one."""
+    event = threading.Event()
+
+    timer = RepeatTimer(60, event.set)
+    timer.start()
+    timer.set_interval(0.05)
+    called = event.wait(timeout=2.0)
+    timer.stop()
+    assert called, "New interval was not applied until the old one finished"
+    assert timer.interval == 0.05
+
+
+def test_set_interval_same_value_keeps_pending_tick():
+    """Setting the same interval leaves the pending tick alone."""
+    timer = RepeatTimer(60, lambda: None)
+    timer.start()
+    pending = timer._timer
+    timer.set_interval(60)
+    assert timer._timer is pending
+    timer.stop()
+
+
+def test_set_interval_when_stopped_does_not_start():
+    """Changing the interval of a stopped timer does not start it."""
+    timer = RepeatTimer(60, lambda: None)
+    timer.set_interval(30)
+    assert timer.interval == 30
+    assert timer.is_running is False
