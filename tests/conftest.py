@@ -58,6 +58,14 @@ def static_config():
                 "device_class": "current",
                 "suggested_display_precision": 2,
             },
+            "power": {
+                "name": "power",
+                "pretty": "Power",
+                "type": "sensor",
+                "unit": "W",
+                "device_class": "power",
+                "suggested_display_precision": 2,
+            },
             "battery_level": {
                 "name": "battery_level",
                 "pretty": "Battery level",
@@ -71,6 +79,12 @@ def static_config():
                 "type": "binary_sensor",
                 "device_class": "plug",
                 "entity_category": "diagnostic",
+            },
+            "charging": {
+                "name": "charging",
+                "pretty": "Charging",
+                "type": "binary_sensor",
+                "device_class": "battery_charging",
             },
             "cpu_temperature": {
                 "name": "cpu_temperature",
@@ -87,6 +101,7 @@ def static_config():
                 "type": "sensor",
                 "entity_category": "diagnostic",
                 "enabled_by_default": False,
+                "state_class": None,
             },
             "cpu_stat_text": {
                 "name": "cpu_stat",
@@ -97,7 +112,7 @@ def static_config():
             },
             "battery_warning_threshold": {
                 "name": "battery_warning_threshold",
-                "pretty": "Battery warning",
+                "pretty": "Battery shutdown level",
                 "type": "number",
                 "unit": "%",
                 "device_class": "battery",
@@ -160,6 +175,7 @@ def static_config():
             "shunt_ohms": 0.05,
             "max_expected_amps": 5.5,
             "monitor_interval": 5,
+            "bus": 1,
         },
         "system": {
             "shutdown": "sudo shutdown 0 -h",
@@ -185,6 +201,7 @@ def mock_ina():
     mock = MagicMock()
     mock.voltage.return_value = 3.7
     mock.current.return_value = -50.0
+    mock.power.return_value = 185.0
     mock.configure.return_value = None
     mock.RANGE_16V = 0
     return mock

@@ -288,3 +288,77 @@ def test_linked_config_converts_quoted_values(tmp_path):
     assert config.static["mqtt"]["port"] == 1884
     assert config.static["mqtt"]["exit_on_fail"] is False
     assert config.static["ina"]["shunt_ohms"] == 0.1
+
+
+def test_linked_config_new_defaults(tmp_path):
+    """New options have defaults, so existing config files keep working."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text(yaml.dump({"hostname": {"name": "garage-pi"}}))
+
+    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+
+    assert config.static["ina"]["bus"] == 1
+    assert config.static["mqtt"]["tls"]["enabled"] is False
+    assert config.static["fields"]["power"]["unit"] == "W"
+    assert config.static["fields"]["charging"]["type"] == "binary_sensor"
+    assert config.static["fields"]["cpu_stat_raw"]["state_class"] is None
+    assert (
+        config.static["fields"]["battery_warning_threshold"]["pretty"]
+        == "Battery shutdown level"
+    )
+
+
+def test_linked_config_overrides_new_options(tmp_path):
+    """The I2C bus and TLS can be set from the config file."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text(
+        yaml.dump(
+            {
+                "ina": {"bus": 0},
+                "mqtt": {"tls": {"enabled": True, "ca_certs": "/etc/ca.crt"}},
+            },
+        ),
+    )
+
+    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+
+    assert config.static["ina"]["bus"] == 0
+    assert config.static["ina"]["address"] == 0x40
+    assert config.static["mqtt"]["tls"]["enabled"] is True
+    assert config.static["mqtt"]["tls"]["ca_certs"] == "/etc/ca.crt"
+    assert config.static["mqtt"]["tls"]["insecure"] is False
+
+
+def test_linked_config_converts_quoted_new_options(tmp_path):
+    """Quoted I2C bus and TLS flags are converted like the other options."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text(
+        "ina: {bus: '2'}\nmqtt: {tls: {enabled: 'true', insecure: 'False'}}\n",
+    )
+
+    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+
+    assert config.static["ina"]["bus"] == 2
+    assert config.static["mqtt"]["tls"]["enabled"] is True
+    assert config.static["mqtt"]["tls"]["insecure"] is False
+
+
+@pytest.mark.parametrize(
+    ("contents", "message"),
+    [
+        ("ina: {bus: -1}", "`ina.bus`"),
+        ("ina: {bus: 1.5}", "`ina.bus`"),
+        ("ina: {bus: true}", "`ina.bus`"),
+        ("mqtt: {tls: yes}", "`mqtt.tls` must be a mapping"),
+        ("mqtt: {tls: {enabled: 'maybe'}}", "`mqtt.tls.enabled`"),
+        ("mqtt: {tls: {insecure: 1}}", "`mqtt.tls.insecure`"),
+        ("mqtt: {tls: {ca_certs: 5}}", "`mqtt.tls.ca_certs`"),
+    ],
+)
+def test_linked_config_rejects_invalid_new_options(tmp_path, contents, message):
+    """Invalid I2C bus or TLS settings fail at start with a clear message."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text(contents)
+
+    with pytest.raises(ConfigurationError, match=message.replace(".", r"\.")):
+        LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))

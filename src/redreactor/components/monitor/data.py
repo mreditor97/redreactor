@@ -15,6 +15,8 @@ class MonitorData:
 
     voltage: float
     current: float
+    power: float
+    charging: bool
     battery_level: float
     external_power: bool
     cpu_temperature: float | None
@@ -29,6 +31,8 @@ class MonitorData:
         self,
         voltage: float = 0.0,
         current: float = 0.0,
+        power: float = 0.0,
+        charging: bool = False,  # noqa: FBT001, FBT002
         battery_level: float = 0.0,
         external_power: bool = True,  # noqa: FBT001, FBT002
         cpu_temperature: float = 0.0,
@@ -42,6 +46,8 @@ class MonitorData:
         """Initialise Monitor Data."""
         self.voltage = voltage
         self.current = current
+        self.power = power
+        self.charging = charging
         self.battery_level = battery_level
         self.external_power = external_power
         self.cpu_temperature = cpu_temperature

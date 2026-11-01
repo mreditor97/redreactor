@@ -148,10 +148,13 @@ def test_on_connect_reaches_real_listeners(static_config, dynamic_config, mock_i
     Commander(static_config, dynamic_config, monitor)
     homeassistant = Homeassistant(static_config, dynamic_config)
 
-    with patch.object(monitor.report_timer, "start") as report_start, patch.object(
-        homeassistant.configuration_report_timer,
-        "start",
-    ) as discovery_start:
+    with (
+        patch.object(monitor.report_timer, "start") as report_start,
+        patch.object(
+            homeassistant.configuration_report_timer,
+            "start",
+        ) as discovery_start,
+    ):
         mqtt._mqtt_on_connect(client, None, None, SUCCESS)
 
     report_start.assert_called_once()
@@ -212,5 +215,64 @@ def test_invalid_mqtt_version_exits(static_config, version):
 
     with patch(CLIENT), pytest.raises(SystemExit) as exit_info:
         MQTT(static_config, exit_on_fail=False)
+
+    assert exit_info.value.code == 1
+
+
+def test_tls_is_off_by_default(static_config):
+    """Without TLS configuration the connection is not encrypted."""
+    _, client = _make_mqtt(static_config)
+
+    client.tls_set.assert_not_called()
+
+
+def test_tls_is_configured_before_connect(static_config):
+    """Enabled TLS passes the certificate paths to paho before connecting."""
+    static_config["mqtt"]["tls"] = {
+        "enabled": True,
+        "ca_certs": "/ssl/ca.crt",
+        "certfile": "/ssl/client.crt",
+        "keyfile": "/ssl/client.key",
+        "insecure": False,
+    }
+    mqtt, client = _make_mqtt(static_config)
+    mqtt.connect("127.0.0.1", 8883, 60)
+
+    client.tls_set.assert_called_once_with(
+        ca_certs="/ssl/ca.crt",
+        certfile="/ssl/client.crt",
+        keyfile="/ssl/client.key",
+    )
+    client.tls_insecure_set.assert_not_called()
+    names = [name for name, _, _ in client.mock_calls]
+    assert names.index("tls_set") < names.index("connect")
+
+
+def test_tls_empty_paths_use_system_certificates(static_config):
+    """Empty paths (as Home Assistant app options give) mean "not set"."""
+    static_config["mqtt"]["tls"] = {"enabled": True, "ca_certs": ""}
+    _, client = _make_mqtt(static_config)
+
+    client.tls_set.assert_called_once_with(ca_certs=None, certfile=None, keyfile=None)
+
+
+def test_tls_insecure_disables_hostname_check(static_config):
+    """The insecure option turns off hostname verification, for testing only."""
+    static_config["mqtt"]["tls"] = {"enabled": True, "insecure": True}
+    _, client = _make_mqtt(static_config)
+
+    client.tls_insecure_set.assert_called_once_with(True)
+
+
+def test_tls_configuration_error_exits(static_config):
+    """A missing certificate file stops the service instead of going unencrypted."""
+    static_config["mqtt"]["tls"] = {"enabled": True, "ca_certs": "/missing.crt"}
+
+    from redreactor.components.mqtt import MQTT
+
+    with patch(CLIENT) as mock_client_class:
+        mock_client_class.return_value.tls_set.side_effect = FileNotFoundError
+        with pytest.raises(SystemExit) as exit_info:
+            MQTT(static_config, exit_on_fail=False)
 
     assert exit_info.value.code == 1
