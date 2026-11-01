@@ -112,7 +112,7 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --target "${REF}" \
             --prerelease \
-            --title "${VERSION}" \
+            --title "v${VERSION}" \
             --notes "Alpha build of ${REF} for the edge app."
       - name: 🚀 Attach the beta to its GitHub pre-release
         # Betas are not sent to PyPI, the beta app installs the wheel attached
