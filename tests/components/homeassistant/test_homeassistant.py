@@ -189,6 +189,7 @@ def test_discovery_includes_power_and_charging(homeassistant):
         "homeassistant/binary_sensor/redreactor_redreactor_charging/config"
     ]
     assert charging["device_class"] == "battery_charging"
+    assert charging["entity_category"] == "diagnostic"
     assert charging["payload_on"] == "ON"
     assert charging["value_template"] == "{{ value_json.charging }}"
 
@@ -255,12 +256,12 @@ def test_discovery_includes_battery_capacity(homeassistant):
 
 
 def test_discovery_includes_battery_time_remaining(homeassistant):
-    """The time remaining is a duration sensor in minutes."""
+    """The time remaining is a duration sensor in days."""
     published = _discovery_payloads(homeassistant)
 
     remaining = published[
         "homeassistant/sensor/redreactor_redreactor_battery_time_remaining/config"
     ]
-    assert remaining["unit_of_measurement"] == "min"
+    assert remaining["unit_of_measurement"] == "d"
     assert remaining["device_class"] == "duration"
     assert remaining["value_template"] == "{{ value_json.battery_time_remaining }}"

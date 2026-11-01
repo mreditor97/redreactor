@@ -524,6 +524,7 @@ class LinkedConfiguration:
                     "pretty": "Charging",
                     "type": "binary_sensor",
                     "device_class": "battery_charging",
+                    "entity_category": "diagnostic",
                 },
                 "cpu_temperature": {
                     "name": "cpu_temperature",
@@ -612,9 +613,9 @@ class LinkedConfiguration:
                     "name": "battery_time_remaining",
                     "pretty": "Battery time remaining",
                     "type": "sensor",
-                    "unit": "min",
+                    "unit": "d",
                     "device_class": "duration",
-                    "suggested_display_precision": 0,
+                    "suggested_display_precision": 1,
                 },
                 "restart": {
                     "name": "restart",

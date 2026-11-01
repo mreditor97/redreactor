@@ -52,7 +52,7 @@ Topic `redreactor/your-configured-hostname/state`
 ```json
 {
   "voltage": 4.164,
-  "current": 2.1799,
+  "current": -2.1799,
   "power": 0.009,
   "battery_level": 100,
   "external_power": "ON",
@@ -72,7 +72,7 @@ Topic `redreactor/your-configured-hostname/state`
 #### State Description
 
 - `voltage` is the Voltage of the connected batteries
-- `current` is the Current draw from the batteries in mA (negative while charging)
+- `current` is the current through the batteries in mA, negative while they are discharging and positive while they are charging
 - `power` is the power drawn from the batteries in W
 - `battery_level` is the percentage value of charge left in the batteries
 - `external_power` is whether the batteries are connected to an external power source or not
@@ -85,7 +85,7 @@ Topic `redreactor/your-configured-hostname/state`
 - `battery_voltage_maximum` is the voltage at which is to be considered the maximum at which the battery can be (this is used in the calculation of the `battery_level`)
 - `report_interval` is the reporting interval at which the data will be published onto the **state** topic
 - `battery_capacity` is the total capacity of the batteries in mAh (with two cells in parallel, the sum of both), set it from Home Assistant or the command topic. `0` means not set
-- `battery_time_remaining` is a rough estimate of the minutes left on battery before the low battery shutdown, from `battery_capacity`, `battery_level` above `battery_warning_threshold` and `current`. It is `null` (unknown in Home Assistant) while there is external power or `battery_capacity` is `0`. The battery level is worked out from the voltage, which isn't linear with the charge left, so treat it as a guide
+- `battery_time_remaining` is a rough estimate of the days left on battery before the low battery shutdown, from `battery_capacity`, `battery_level` above `battery_warning_threshold` and `current`. It is `null` (unknown in Home Assistant) while there is external power or `battery_capacity` is `0`. The battery level is worked out from the voltage, which isn't linear with the charge left, so treat it as a guide
 
 ### Status
 

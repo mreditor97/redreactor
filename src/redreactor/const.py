@@ -41,3 +41,5 @@ DEFAULT_LOG_BACKUP_COUNT = 3
 # Seconds to wait after Home Assistant comes online before resending the latest
 # readings, so the entities exist when the state message arrives
 HOMEASSISTANT_ONLINE_STATE_DELAY = 2.0
+# Hours in a day, the battery time remaining is published in days
+HOURS_PER_DAY = 24

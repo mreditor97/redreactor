@@ -606,8 +606,9 @@ def test_time_remaining_on_battery(monitor, mock_ina, dynamic_config):
         _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
 
     assert monitor.data.battery_level == 49
-    # (49% - 10% shutdown level) of 3000mAh = 1170mAh, at 500mA is 140.4 minutes
-    assert monitor._calculate_battery_time_remaining() == 140.4
+    # (49% - 10% shutdown level) of 3000mAh = 1170mAh, at 500mA is 2.34 hours,
+    # published in days
+    assert monitor._calculate_battery_time_remaining() == 0.097
 
 
 def test_time_remaining_zero_at_shutdown_level(monitor, mock_ina, dynamic_config):
@@ -656,7 +657,9 @@ def test_state_payload_includes_capacity_and_time_remaining(
 
     state = json.loads(published["redreactor/redreactor/state"])
     assert state["battery_capacity"] == 3000
-    assert state["battery_time_remaining"] == 140.4
+    assert state["battery_time_remaining"] == 0.097
+    # Discharging is published as a negative current
+    assert state["current"] == -500.0
 
 
 # ---------------------------------------------------------------------------
@@ -682,6 +685,8 @@ def test_state_payload_includes_new_fields(monitor, mock_ina):
     state = json.loads(published["redreactor/redreactor/state"])
     assert state["power"] == 1.234
     assert state["charging"] == "ON"
+    # Charging is published as a positive current
+    assert state["current"] == 50.0
 
 
 def test_ina_uses_configured_bus(static_config, dynamic_config, mock_ina):
@@ -716,7 +721,7 @@ def test_read_once_returns_a_reading(static_config, mock_ina):
         "i2c_bus": 1,
         "i2c_address": "0x40",
         "voltage": 4.1,
-        "current": -120.0,
+        "current": 120.0,
         "power": 0.492,
         "charging": True,
     }

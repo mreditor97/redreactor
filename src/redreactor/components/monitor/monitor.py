@@ -24,6 +24,7 @@ from redreactor.const import (
     DEFAULT_BATTERY_WARNING_THRESHOLD,
     DEFAULT_REPORT_INTERVAL,
     DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS,
+    HOURS_PER_DAY,
 )
 from redreactor.helpers.cpu_utils import (
     decode_cpu_stat_text,
@@ -60,7 +61,8 @@ def read_once(static_configuration: dict[str, Any]) -> dict[str, Any]:
             "i2c_bus": int(ina_configuration["bus"]),
             "i2c_address": hex(ina_configuration["address"]),
             "voltage": round(ina.voltage(), 3),
-            "current": round(current, 4),
+            # Published negative while discharging, positive while charging
+            "current": round(-current, 4),
             "power": round(ina.power() / 1000, 3),
             "charging": current < 0,
         }
@@ -466,7 +468,7 @@ class Monitor:
         )
 
     def _calculate_battery_time_remaining(self) -> float | None:
-        """Estimate the minutes left on battery before the low battery shutdown.
+        """Estimate the days left on battery before the low battery shutdown.
 
         The charge left above the shutdown level, taken from the battery
         capacity and the voltage based battery level, divided by the current
@@ -489,7 +491,7 @@ class Monitor:
         )
         remaining_mah = self.data.battery_capacity * usable_percentage / 100
 
-        return round(remaining_mah / self.data.current * 60, 1)
+        return round(remaining_mah / self.data.current / HOURS_PER_DAY, 3)
 
     def _update_cpu_information(self) -> None:
         """Update CPU information, including temperature and throttling."""
@@ -542,8 +544,11 @@ class Monitor:
                         self.data.voltage,
                         3,
                     ),
+                    # The INA219 reads the discharge current as positive. It is
+                    # published the other way round, negative while the battery
+                    # is discharging and positive while it is charging.
                     f"{self._static_configuration['fields']['current']['name']}": round(
-                        self.data.current,
+                        -self.data.current,
                         4,
                     ),
                     f"{self._static_configuration['fields']['power']['name']}": round(
