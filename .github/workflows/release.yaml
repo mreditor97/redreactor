@@ -78,6 +78,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Read by Release Drafter to list the changes
+      pull-requests: read
     outputs:
       wheel: ${{ steps.wheel.outputs.file }}
     steps:
@@ -99,21 +101,39 @@ jobs:
         run: uv version --frozen "${VERSION}"
       - name: 🏗 Build package
         run: uv build
+      - name: 📝 Draft the alpha release notes
+        # The same "What's changed" notes as stable releases, from the
+        # Release Drafter config, covering changes since the last pre-release.
+        # dry-run only works out the notes, it doesn't touch any release
+        id: notes
+        if: needs.information.outputs.environment == 'edge'
+        # release-drafter/release-drafter v7.10.0
+        uses: release-drafter/release-drafter@978bb0b30c5ee8cdd332ced253758157150d43f0
+        with:
+          dry-run: true
+          prerelease: true
+          commitish: ${{ needs.information.outputs.ref }}
+          version: ${{ needs.information.outputs.version }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
       - name: 🚀 Publish the alpha as a GitHub pre-release
         # Edge builds are not sent to PyPI, the edge app installs the wheel
         # attached to this pre-release
         if: needs.information.outputs.environment == 'edge'
         env:
           GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ steps.notes.outputs.body }}
           REF: ${{ needs.information.outputs.ref }}
           VERSION: ${{ needs.information.outputs.version }}
         run: |
+          printf 'Alpha build of %s for the edge app.\n\n%s\n' "${REF}" "${NOTES}" \
+            > "${RUNNER_TEMP}/notes.md"
           gh release create "${VERSION}" dist/* \
             --repo "${GITHUB_REPOSITORY}" \
             --target "${REF}" \
             --prerelease \
-            --title "${VERSION}" \
-            --notes "Alpha build of ${REF} for the edge app."
+            --title "v${VERSION}" \
+            --notes-file "${RUNNER_TEMP}/notes.md"
       - name: 🚀 Attach the beta to its GitHub pre-release
         # Betas are not sent to PyPI, the beta app installs the wheel attached
         # to the pre-release

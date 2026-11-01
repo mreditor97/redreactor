@@ -45,6 +45,10 @@ dev = [
   "types-requests==2.33.0.20261030",
 ]
 
+[tool.codespell]
+# commitish is an input name of the Release Drafter action
+ignore-words-list = "commitish"
+
 [tool.coverage.run]
 plugins = ["covdefaults"]
 source = ["redreactor"]
