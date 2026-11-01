@@ -21,33 +21,54 @@ jobs:
       github.event_name == 'release'
       ||  (
         github.event_name == 'workflow_run'
+        && github.event.workflow_run.event == 'push'
         && github.event.workflow_run.conclusion == 'success'
       )
     name: ℹ️ Gather information
     runs-on: ubuntu-latest
     outputs:
-      environment: ${{ steps.release.outputs.environment}}
+      environment: ${{ steps.release.outputs.environment }}
+      ref: ${{ steps.release.outputs.ref }}
       version: ${{ steps.release.outputs.version }}
     steps:
       - name: ⤵️ Check out code from GitHub
         uses: actions/checkout@v7
+        with:
+          # Full history and tags, to find the latest stable release
+          fetch-depth: 0
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - name: ℹ️ Gather version and environment
         id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+          IS_PRERELEASE: ${{ github.event.release.prerelease }}
+          REF: ${{ github.event.workflow_run.head_sha || github.sha }}
+          RUN_NUMBER: ${{ github.run_number }}
         run: |
-          sha="${{ github.sha }}"
-          environment="edge"
-          version="${sha:0:7}"
-          if [[ "${{ github.event_name }}" = "release" ]]; then
-            version="${{ github.event.release.tag_name }}"
-            version="${version,,}"
+          if [[ "${EVENT_NAME}" = "release" ]]; then
+            version="${TAG_NAME,,}"
             version="${version#v}"
             environment="stable"
-            if [[ "${{ github.event.release.prerelease }}" = "true" ]]; then
+            if [[ "${IS_PRERELEASE}" = "true" ]]; then
               environment="beta"
             fi
+          else
+            # Every successful CI run on master becomes an alpha of the
+            # next patch release, e.g. 0.1.8 -> 0.1.9a42
+            environment="edge"
+            latest=$(git tag --list \
+              | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
+              | sed 's/^v//' \
+              | sort -V \
+              | tail -n 1)
+            latest="${latest:-0.0.0}"
+            IFS=. read -r major minor patch <<< "${latest}"
+            version="${major}.${minor}.$((patch + 1))a${RUN_NUMBER}"
           fi
 
           echo "environment=${environment}" >> "$GITHUB_OUTPUT"
+          echo "ref=${REF}" >> "$GITHUB_OUTPUT"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
   release:
@@ -58,6 +79,8 @@ jobs:
     steps:
       - name: ⤵️ Check out code from GitHub
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.information.outputs.ref }}
       - name: 🏗 Set up Poetry
         run: pipx install poetry
       - name: 🏗 Set up Python 3.10
@@ -73,18 +96,40 @@ jobs:
       - name: 🏗 Install dependencies
         run: poetry install --no-interaction
       - name: 🏗 Set package version
-        run: |
-          version="${{ github.event.release.tag_name }}"
-          version="${version,,}"
-          version="${version#v}"
-          poetry version --no-interaction "${version}"
+        env:
+          VERSION: ${{ needs.information.outputs.version }}
+        run: poetry version --no-interaction "${VERSION}"
       - name: 🏗 Build package
         run: poetry build --no-interaction
       - name: 🚀 Publish to PyPi
+        # Edge builds are published as alpha pre-releases, which pip only
+        # installs when that exact version is asked for
         if: |
           needs.information.outputs.environment == 'stable'
+          || needs.information.outputs.environment == 'edge'
         env:
           PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
         run: |
           poetry config pypi-token.pypi "${PYPI_TOKEN}"
           poetry publish --no-interaction
+
+  app-edge:
+    name: 📢 Update the edge app
+    if: needs.information.outputs.environment == 'edge'
+    needs:
+      - information
+      - release
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🚀 Ask the app repository to build an edge version
+        # peter-evans/repository-dispatch v4.0.1
+        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697
+        with:
+          token: ${{ secrets.DISPATCH_TOKEN }}
+          repository: ${{ github.repository_owner }}/app-redreactor
+          event-type: redreactor-edge
+          client-payload: >
+            {
+              "version": "${{ needs.information.outputs.version }}",
+              "commit": "${{ needs.information.outputs.ref }}"
+            }
