@@ -60,7 +60,10 @@ def test_on_connect_subscribes_to_birth_topic(homeassistant):
 
 def test_birth_message_republishes_discovery(homeassistant):
     """Home Assistant coming online triggers an immediate discovery publish."""
-    with patch.object(homeassistant, "_update_homeassistant_configuration") as update:
+    with (
+        patch.object(homeassistant, "_update_homeassistant_configuration") as update,
+        patch("redreactor.components.homeassistant.homeassistant.threading.Timer"),
+    ):
         homeassistant._mqtt_on_message(
             None,
             None,
@@ -68,6 +71,55 @@ def test_birth_message_republishes_discovery(homeassistant):
         )
 
     update.assert_called_once()
+
+
+def test_birth_message_resends_latest_readings(homeassistant):
+    """Home Assistant coming online asks for the latest readings after a delay."""
+    from redreactor.components.mqtt import MQTT
+    from redreactor.const import HOMEASSISTANT_ONLINE_STATE_DELAY
+
+    with (
+        patch.object(homeassistant, "_update_homeassistant_configuration"),
+        patch(
+            "redreactor.components.homeassistant.homeassistant.threading.Timer",
+        ) as timer,
+    ):
+        homeassistant._mqtt_on_message(
+            None,
+            None,
+            _message("homeassistant/status", b"online"),
+        )
+
+    timer.assert_called_once_with(
+        HOMEASSISTANT_ONLINE_STATE_DELAY,
+        MQTT.event.emit,
+        args=("homeassistant_online",),
+    )
+    timer.return_value.start.assert_called_once()
+
+
+def test_status_topic_and_payload_are_configurable(static_config, dynamic_config):
+    """A custom birth topic and payload are subscribed to and matched."""
+    from redreactor.components.homeassistant import Homeassistant
+
+    static_config["homeassistant"]["status_topic"] = "ha/birth"
+    static_config["homeassistant"]["status_online"] = "up"
+    homeassistant = Homeassistant(static_config, dynamic_config)
+    client = MagicMock()
+
+    with (
+        patch.object(homeassistant, "_update_homeassistant_configuration") as update,
+        patch.object(homeassistant.configuration_report_timer, "start"),
+        patch("redreactor.components.homeassistant.homeassistant.threading.Timer"),
+    ):
+        homeassistant._mqtt_on_connect(client, None, None, None)
+        update.reset_mock()
+        homeassistant._mqtt_on_message(None, None, _message("ha/birth", b"online"))
+        update.assert_not_called()
+        homeassistant._mqtt_on_message(None, None, _message("ha/birth", b"up"))
+        update.assert_called_once()
+
+    client.subscribe.assert_called_once_with(topic="ha/birth")
 
 
 @pytest.mark.parametrize(
@@ -79,10 +131,16 @@ def test_birth_message_republishes_discovery(homeassistant):
 )
 def test_other_messages_do_not_republish_discovery(homeassistant, topic, payload):
     """Only Home Assistant's online birth message triggers discovery."""
-    with patch.object(homeassistant, "_update_homeassistant_configuration") as update:
+    with (
+        patch.object(homeassistant, "_update_homeassistant_configuration") as update,
+        patch(
+            "redreactor.components.homeassistant.homeassistant.threading.Timer",
+        ) as timer,
+    ):
         homeassistant._mqtt_on_message(None, None, _message(topic, payload))
 
     update.assert_not_called()
+    timer.assert_not_called()
 
 
 def test_device_sw_version_is_package_version(homeassistant):

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from importlib.metadata import version
 from typing import TYPE_CHECKING, Any
 
 from redreactor.components.mqtt import MQTT
+from redreactor.const import HOMEASSISTANT_ONLINE_STATE_DELAY
 from redreactor.helpers.repeater import RepeatTimer
 
 from .binary_sensor import BinarySensor
@@ -186,9 +188,14 @@ class Homeassistant:
             )
 
     @property
-    def _birth_topic(self) -> str:
-        """Topic Home Assistant publishes its birth message to."""
-        return f"{self._static_configuration['homeassistant']['topic']}/status"
+    def _status_topic(self) -> str:
+        """Topic Home Assistant publishes its online / offline status to."""
+        return str(self._static_configuration["homeassistant"]["status_topic"])
+
+    @property
+    def _status_online(self) -> str:
+        """Payload Home Assistant publishes when it comes online."""
+        return str(self._static_configuration["homeassistant"]["status_online"])
 
     def _mqtt_on_connect(
         self,
@@ -202,8 +209,8 @@ class Homeassistant:
         self._update_homeassistant_configuration()
         self.configuration_report_timer.start()
         # Home Assistant announces itself here when it (re)starts, so the
-        # discovery configuration can be sent again straight away
-        client.subscribe(topic=self._birth_topic)
+        # discovery configuration and latest readings can be sent again
+        client.subscribe(topic=self._status_topic)
 
     def _mqtt_on_message(
         self,
@@ -211,10 +218,23 @@ class Homeassistant:
         _userdata: Any,
         message: MQTTMessage,
     ) -> None:
-        """Republish discovery when Home Assistant comes online."""
+        """Republish discovery and the latest readings when Home Assistant is online."""
         if (
-            message.topic == self._birth_topic
-            and message.payload.decode("utf-8", errors="replace") == "online"
+            message.topic == self._status_topic
+            and message.payload.decode("utf-8", errors="replace") == self._status_online
         ):
-            self.logger.info("Home Assistant is online, publishing discovery")
+            self.logger.info(
+                "Home Assistant is online, publishing discovery and latest readings",
+            )
             self._update_homeassistant_configuration()
+
+            # The readings are not retained, so Home Assistant shows them as
+            # unknown until the next report. Wait briefly so it has created the
+            # entities from the discovery messages before the state arrives.
+            timer = threading.Timer(
+                HOMEASSISTANT_ONLINE_STATE_DELAY,
+                MQTT.event.emit,
+                args=("homeassistant_online",),
+            )
+            timer.daemon = True
+            timer.start()

@@ -34,6 +34,8 @@ def static_config():
         "homeassistant": {
             "discovery": True,
             "topic": "homeassistant",
+            "status_topic": "homeassistant/status",
+            "status_online": "online",
             "discovery_interval": 120,
             "expire_after": 120,
         },

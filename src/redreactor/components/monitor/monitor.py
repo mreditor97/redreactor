@@ -152,6 +152,10 @@ class Monitor:
         # Register MQTT on connect listener
         MQTT.event.on(event_name="on_connect", function=self._mqtt_on_connect)
 
+        # Resend the latest readings when Home Assistant restarts, rather than
+        # leaving them unknown until the next report
+        MQTT.event.on(event_name="homeassistant_online", function=self._update)
+
         self.logger.info("Initiating battery monitor")
 
         # Configure the report timer, gets started on MQTT connect

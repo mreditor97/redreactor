@@ -39,6 +39,8 @@ If you haven't already got yourself a Red Reactor (An uninterruptible battery po
 
 Connecting your Home Assistant instance to the same MQTT Broker as your Red Reactor will allow your Red Reactor to be auto discovered by your Home Assistant instance. It will give you access to all the readings available from the Red Reactor sensors, and allows full configuration of the Red Reactor on the fly - it even adds the ability to reboot and shutdown your device at the push of a button.
 
+When Home Assistant restarts it publishes `online` to `homeassistant/status`. The Red Reactor listens for this and sends its discovery configuration and latest readings straight away, rather than leaving the entities unknown until the next report. If your Home Assistant MQTT integration uses a different birth message, set `homeassistant.status_topic` and `homeassistant.status_online` in the configuration file to match.
+
 There is also a [Home Assistant Add-on](https://github.com/mreditor97/homeassistant-addons) available for Supervisor users. Installation instructions can be found in the [wiki](https://github.com/mreditor97/redreactor/wiki).
 
 ## MQTT
