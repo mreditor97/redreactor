@@ -147,9 +147,11 @@ jobs:
 
   app:
     name: 📢 Update the ${{ needs.information.outputs.environment }} app
+    # Runs after the release job, so a stable version is already on PyPI
     if: |
-      needs.information.outputs.environment == 'edge'
+      needs.information.outputs.environment == 'stable'
       || needs.information.outputs.environment == 'beta'
+      || needs.information.outputs.environment == 'edge'
     needs:
       - information
       - release
@@ -162,8 +164,9 @@ jobs:
           token: ${{ secrets.DISPATCH_TOKEN }}
           repository: ${{ github.repository_owner }}/app-redreactor
           event-type: redreactor-release
-          # The GitHub pre-release the wheel is attached to: the alpha version
-          # for edge, the published tag for beta
+          # The GitHub release: the published tag for stable and beta, the
+          # alpha version for edge. Stable installs from PyPI, beta and edge
+          # from the wheel attached to the release
           client-payload: >
             {
               "channel": "${{ needs.information.outputs.environment }}",
