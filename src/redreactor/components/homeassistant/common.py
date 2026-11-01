@@ -117,7 +117,7 @@ class Base(Representer):
     entity_category: str | None
     expire_after: int | None  # Number of seconds after state becomes unavailable
     icon: str | None
-    object_id: str | None
+    default_entity_id: str | None
     unique_id: str | None
     state_topic: str | None
     value_template: str | None
@@ -137,7 +137,7 @@ class Base(Representer):
         entity_category: str | None = None,
         expire_after: int | None = None,
         icon: str | None = None,
-        object_id: str | None = None,
+        default_entity_id: str | None = None,
         unique_id: str | None = None,
         state_topic: str | None = None,
         value_template: str | None = None,
@@ -153,7 +153,7 @@ class Base(Representer):
         self.entity_category = entity_category
         self.expire_after = expire_after
         self.icon = icon
-        self.object_id = object_id
+        self.default_entity_id = default_entity_id
         self.unique_id = unique_id
         self.state_topic = state_topic
         self.value_template = value_template

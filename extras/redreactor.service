@@ -7,7 +7,9 @@
 
 [Unit]
 Description=Red Reactor Service
-After=network.target
+# Wait for an actual network connection, not just the network stack
+Wants=network-online.target
+After=network-online.target
 
 # Restart if service fails but terminate retries if repeated start-up error
 StartLimitIntervalSec=60

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+from importlib.metadata import version
 from typing import TYPE_CHECKING, Any
 
 from redreactor.components.mqtt import MQTT
+from redreactor.const import HOMEASSISTANT_ONLINE_STATE_DELAY
 from redreactor.helpers.repeater import RepeatTimer
 
 from .binary_sensor import BinarySensor
@@ -16,7 +19,7 @@ from .number import Number
 from .sensor import Sensor
 
 if TYPE_CHECKING:
-    from paho.mqtt.client import Client
+    from paho.mqtt.client import Client, MQTTMessage
 
     from redreactor.configuration import DynamicConfiguration
 
@@ -26,7 +29,7 @@ class Homeassistant:
 
     logger = logging.getLogger("Red Reactor")
 
-    configuration: list[Sensor | Number | BinarySensor | Button] = []
+    configuration: list[Sensor | Number | BinarySensor | Button]
 
     _static_configuration: dict[str, Any] = {}
     _dynamic_configuration: DynamicConfiguration
@@ -41,26 +44,17 @@ class Homeassistant:
         """Initialise Home Assistant integration object."""
         self._static_configuration = static_configuration
         self._dynamic_configuration = dynamic_configuration
+        self.configuration = []
 
         self._process_homeassistant_configuration(static_configuration)
 
         # Register MQTT listeners
         MQTT.event.on(event_name="on_connect", function=self._mqtt_on_connect)
-
-        # Register Dynamic Configuration update listener
-        self._dynamic_configuration.event.on(
-            event_name="write",
-            function=self._update_homeassistant_timer,
-        )
+        MQTT.event.on(event_name="on_message", function=self._mqtt_on_message)
 
         # Push a configuration update at a repeated interval
         self.configuration_report_timer = RepeatTimer(
-            float(
-                self._dynamic_configuration.data[
-                    self._static_configuration["fields"]["report_interval"]["name"]
-                ],
-            )
-            * 4,
+            float(self._static_configuration["homeassistant"]["discovery_interval"]),
             self._update_homeassistant_configuration,
         )
 
@@ -74,7 +68,7 @@ class Homeassistant:
             manufacturer="Pascal Herczog",
             model="Red Reactor",
             hw_version="Rev 1.5",
-            sw_version="1.0.0",
+            sw_version=version("redreactor"),
         )
 
         for field_key in static_configuration["fields"]:
@@ -86,7 +80,7 @@ class Homeassistant:
                 expire_after=int(static_configuration["homeassistant"]["expire_after"]),
                 entity_category=field.get("entity_category", None),
                 icon=field.get("icon", None),
-                object_id=field.get("object_id", None),
+                default_entity_id=self._default_entity_id(field),
                 unique_id=f"{configuration_defaults.identifiers}_{field['name']}",
                 state_topic=f"{static_configuration['mqtt']['base_topic']}/{static_configuration['hostname']['name']}/{static_configuration['mqtt']['topic']['state']}",
                 configuration_topic=f"{static_configuration['homeassistant']['topic']}/{field['type']}/{configuration_defaults.identifiers}_{field['name']}/config",
@@ -153,6 +147,28 @@ class Homeassistant:
 
             self.configuration.append(configured)
 
+    def _default_entity_id(self, field: dict[str, Any]) -> str | None:
+        """Return the entity ID Home Assistant should create the entity with.
+
+        Home Assistant deprecated `object_id` in favour of `default_entity_id`,
+        which takes a full entity ID including the domain. An `object_id` from
+        older configuration files is converted so it keeps working.
+        """
+        if field.get("default_entity_id"):
+            return str(field["default_entity_id"])
+
+        if field.get("object_id"):
+            self.logger.warning(
+                "The `object_id` option of the %s field is deprecated, "
+                "use `default_entity_id: %s.%s` instead",
+                field["name"],
+                field["type"],
+                field["object_id"],
+            )
+            return f"{field['type']}.{field['object_id']}"
+
+        return None
+
     def _update_homeassistant_configuration(self) -> None:
         """Push Home Assistant configuration for auto discovery."""
         self.logger.debug(
@@ -171,21 +187,54 @@ class Homeassistant:
                 ),
             )
 
-    def _update_homeassistant_timer(self) -> None:
-        """Update Home Assistant configuration update timer."""
-        # Update configuration report interval timer
-        self.configuration_report_timer.interval = float(
-            self._static_configuration["homeassistant"]["discovery_interval"],
-        )
+    @property
+    def _status_topic(self) -> str:
+        """Topic Home Assistant publishes its online / offline status to."""
+        return str(self._static_configuration["homeassistant"]["status_topic"])
+
+    @property
+    def _status_online(self) -> str:
+        """Payload Home Assistant publishes when it comes online."""
+        return str(self._static_configuration["homeassistant"]["status_online"])
 
     def _mqtt_on_connect(
         self,
-        _client: Client,
+        client: Client,
         _userdata: Any,
         _flags: Any,
-        _rc: Any,
-        _reasoncode: Any = None,
+        _reason_code: Any,
+        _properties: Any = None,
     ) -> None:
         """On MQTT Connect, publish Home Assistant configuration."""
         self._update_homeassistant_configuration()
         self.configuration_report_timer.start()
+        # Home Assistant announces itself here when it (re)starts, so the
+        # discovery configuration and latest readings can be sent again
+        client.subscribe(topic=self._status_topic)
+
+    def _mqtt_on_message(
+        self,
+        _client: Client,
+        _userdata: Any,
+        message: MQTTMessage,
+    ) -> None:
+        """Republish discovery and the latest readings when Home Assistant is online."""
+        if (
+            message.topic == self._status_topic
+            and message.payload.decode("utf-8", errors="replace") == self._status_online
+        ):
+            self.logger.info(
+                "Home Assistant is online, publishing discovery and latest readings",
+            )
+            self._update_homeassistant_configuration()
+
+            # The readings are not retained, so Home Assistant shows them as
+            # unknown until the next report. Wait briefly so it has created the
+            # entities from the discovery messages before the state arrives.
+            timer = threading.Timer(
+                HOMEASSISTANT_ONLINE_STATE_DELAY,
+                MQTT.event.emit,
+                args=("homeassistant_online",),
+            )
+            timer.daemon = True
+            timer.start()

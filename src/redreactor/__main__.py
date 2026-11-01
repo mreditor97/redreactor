@@ -1,14 +1,18 @@
 """Red Reactor bootstrap."""
 
 import argparse
+import json
 import logging
+import sys
 from importlib.metadata import version
+from logging.handlers import RotatingFileHandler
 
 from redreactor.components.commander import Commander
 from redreactor.components.homeassistant import Homeassistant
-from redreactor.components.monitor import Monitor
+from redreactor.components.monitor import Monitor, read_once
 from redreactor.components.mqtt import MQTT
-from redreactor.configuration import LinkedConfiguration
+from redreactor.configuration import ConfigurationError, LinkedConfiguration
+from redreactor.const import DEFAULT_LOG_BACKUP_COUNT, DEFAULT_LOG_MAX_BYTES
 
 
 def get_arguments() -> argparse.Namespace:
@@ -35,6 +39,13 @@ def get_arguments() -> argparse.Namespace:
         help="Logging file location",
         dest="logging_file",
     )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Read the Red Reactor once, print the result and exit without "
+        "connecting to MQTT. Useful for checking the I2C setup",
+        dest="check",
+    )
 
     return parser.parse_args()
 
@@ -53,7 +64,11 @@ def main() -> None:
 
     # Create handlers
     c_handler = logging.StreamHandler()
-    f_handler = logging.FileHandler(args.logging_file)
+    f_handler = RotatingFileHandler(
+        args.logging_file,
+        maxBytes=DEFAULT_LOG_MAX_BYTES,
+        backupCount=DEFAULT_LOG_BACKUP_COUNT,
+    )
 
     # Create formatters and add it to handlers
     c_format = logging.Formatter(
@@ -77,22 +92,34 @@ def main() -> None:
     logger.info("Loading in dynamic configuration file: %s", args.database_file)
 
     # Load in configuration files
-    configuration = LinkedConfiguration(args.configuration_file, args.database_file)
+    try:
+        configuration = LinkedConfiguration(
+            args.configuration_file,
+            args.database_file,
+        )
+    except ConfigurationError:
+        logger.exception("Unable to start with the current configuration")
+        sys.exit(1)
 
-    # Update logging levels, limited to listed set
+    # Update logging levels, limited to listed set. Handler.setLevel() only
+    # accepts upper case names, so normalise them first.
     logging_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-    if str(configuration.static["logging"]["console"]).upper() in logging_levels:
-        c_handler.setLevel(configuration.static["logging"]["console"])
-        logger.info(
-            "Console log level set to %s",
-            configuration.static["logging"]["console"],
-        )
-    if str(configuration.static["logging"]["file"]).upper() in logging_levels:
-        f_handler.setLevel(configuration.static["logging"]["file"])
-        logger.info(
-            "File log level set to %s",
-            configuration.static["logging"]["file"],
-        )
+    for handler, name in ((c_handler, "console"), (f_handler, "file")):
+        level = str(configuration.static["logging"][name]).upper()
+        if level in logging_levels:
+            handler.setLevel(level)
+            logger.info("%s log level set to %s", name.capitalize(), level)
+        else:
+            logger.warning(
+                "Invalid %s log level %r, must be one of %s",
+                name,
+                configuration.static["logging"][name],
+                ", ".join(logging_levels),
+            )
+
+    if args.check:
+        print(json.dumps(read_once(configuration.static), indent=2))  # noqa: T201
+        return
 
     # Components register their callbacks on MQTT.event during __init__, so
     # they must all be constructed before mqtt.connect() is called.

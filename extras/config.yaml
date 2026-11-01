@@ -9,7 +9,7 @@ mqtt:
   password: testing # MQTT Broker password
   version: 5 # MQTT Version 5 or 3
 
-  client_id: Red Reactor # Connection Client ID - Defaults to Red Reactor
+  # client_id: Red Reactor # Connection Client ID - Defaults to redreactor-<hostname name>, must be unique per broker
 
   base_topic: redreactor # Red Reactor base publish topic
   topic:
@@ -28,6 +28,8 @@ hostname:
 homeassistant:
   discovery: true # Enable Home Assistant autodiscovery
   topic: homeassistant # Home Assistant discovery topic
+  status_topic: homeassistant/status # Home Assistant birth / status topic
+  status_online: online # Payload Home Assistant sends when it comes online
   discovery_interval: 120 # Discovery configuration push interval
   expire_after: 120 # Adds a MQTT expire time to data received by Home Assistant
 
