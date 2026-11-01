@@ -76,6 +76,8 @@ jobs:
     needs:
       - information
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: ⤵️ Check out code from GitHub
         uses: actions/checkout@v7
@@ -101,12 +103,24 @@ jobs:
         run: poetry version --no-interaction "${VERSION}"
       - name: 🏗 Build package
         run: poetry build --no-interaction
+      - name: 🚀 Publish the alpha as a GitHub pre-release
+        # Edge builds are not sent to PyPI, the edge app installs the wheel
+        # attached to this pre-release
+        if: needs.information.outputs.environment == 'edge'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ needs.information.outputs.ref }}
+          VERSION: ${{ needs.information.outputs.version }}
+        run: |
+          gh release create "${VERSION}" dist/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${REF}" \
+            --prerelease \
+            --title "${VERSION}" \
+            --notes "Alpha build of ${REF} for the edge app."
       - name: 🚀 Publish to PyPi
-        # Edge builds are published as alpha pre-releases, which pip only
-        # installs when that exact version is asked for
         if: |
           needs.information.outputs.environment == 'stable'
-          || needs.information.outputs.environment == 'edge'
         env:
           PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
         run: |
@@ -130,6 +144,5 @@ jobs:
           event-type: redreactor-edge
           client-payload: >
             {
-              "version": "${{ needs.information.outputs.version }}",
-              "commit": "${{ needs.information.outputs.ref }}"
+              "version": "${{ needs.information.outputs.version }}"
             }
