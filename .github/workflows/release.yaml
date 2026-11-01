@@ -78,6 +78,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      wheel: ${{ steps.wheel.outputs.file }}
     steps:
       - name: ⤵️ Check out code from GitHub
         uses: actions/checkout@v7
@@ -118,6 +120,22 @@ jobs:
             --prerelease \
             --title "${VERSION}" \
             --notes "Alpha build of ${REF} for the edge app."
+      - name: 🚀 Attach the beta to its GitHub pre-release
+        # Betas are not sent to PyPI, the beta app installs the wheel attached
+        # to the pre-release
+        if: needs.information.outputs.environment == 'beta'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          gh release upload "${TAG_NAME}" dist/* \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber
+      - name: ℹ️ Find the wheel
+        id: wheel
+        run: |
+          wheels=(dist/*.whl)
+          echo "file=$(basename "${wheels[0]}")" >> "$GITHUB_OUTPUT"
       - name: 🚀 Publish to PyPi
         if: |
           needs.information.outputs.environment == 'stable'
@@ -145,4 +163,25 @@ jobs:
           client-payload: >
             {
               "version": "${{ needs.information.outputs.version }}"
+            }
+
+  app-beta:
+    name: 📢 Update the beta app
+    if: needs.information.outputs.environment == 'beta'
+    needs:
+      - information
+      - release
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🚀 Ask the app repository to build a beta version
+        # peter-evans/repository-dispatch v4.0.1
+        uses: peter-evans/repository-dispatch@28959ce8df70de7be546dd1250a005dd32156697
+        with:
+          token: ${{ secrets.DISPATCH_TOKEN }}
+          repository: ${{ github.repository_owner }}/app-redreactor
+          event-type: redreactor-beta
+          client-payload: >
+            {
+              "tag": "${{ github.event.release.tag_name }}",
+              "wheel": "${{ needs.release.outputs.wheel }}"
             }
