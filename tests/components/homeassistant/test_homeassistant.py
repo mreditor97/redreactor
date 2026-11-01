@@ -143,11 +143,46 @@ def test_other_messages_do_not_republish_discovery(homeassistant, topic, payload
     timer.assert_not_called()
 
 
+DEVICE_TOPIC = "homeassistant/device/redreactor_redreactor/config"
+
+
+def _published(homeassistant, *, migrated=True):
+    """Run a discovery update and return what was published, in order."""
+    from redreactor.components.mqtt import MQTT
+
+    published = []
+    MQTT.event.on(
+        "publish",
+        lambda topic, payload, **kwargs: published.append((topic, payload, kwargs)),
+    )
+    homeassistant._migrated = migrated
+    homeassistant._update_homeassistant_configuration()
+    return published
+
+
+def _device_payload(homeassistant):
+    """Return the published device discovery payload."""
+    import json
+
+    published = _published(homeassistant)
+    assert [topic for topic, _, _ in published] == [DEVICE_TOPIC]
+    return json.loads(published[0][1])
+
+
+def _components(homeassistant):
+    """Return the entities of the device discovery payload by key."""
+    return _device_payload(homeassistant)["components"]
+
+
 def test_device_sw_version_is_package_version(homeassistant):
     """Discovery reports the installed redreactor version."""
     from importlib.metadata import version
 
-    assert homeassistant.configuration[0].device.sw_version == version("redreactor")
+    payload = _device_payload(homeassistant)
+
+    assert payload["device"]["sw_version"] == version("redreactor")
+    assert payload["origin"]["name"] == "redreactor"
+    assert payload["origin"]["sw_version"] == version("redreactor")
 
 
 def test_configuration_is_not_shared_between_instances(static_config, dynamic_config):
@@ -161,54 +196,114 @@ def test_configuration_is_not_shared_between_instances(static_config, dynamic_co
     assert len(second.configuration) == len(static_config["fields"])
 
 
-def _discovery_payloads(homeassistant):
-    """Return the published discovery payloads keyed by topic."""
-    import json
+def test_device_discovery_shares_device_availability_and_state_topic(homeassistant):
+    """Shared options are sent once, at the top of the device discovery."""
+    payload = _device_payload(homeassistant)
 
-    from redreactor.components.mqtt import MQTT
+    assert payload["device"]["identifiers"] == "redreactor_redreactor"
+    assert payload["device"]["name"] == "Red Reactor Red Reactor"
+    assert payload["state_topic"] == "redreactor/redreactor/state"
+    assert payload["availability"] == [
+        {
+            "topic": "redreactor/redreactor/status",
+            "payload_available": "online",
+            "payload_not_available": "offline",
+        },
+    ]
+    for key, component in payload["components"].items():
+        assert "device" not in component, key
+        assert "availability" not in component, key
+        assert "configuration_topic" not in component, key
+        assert "component_id" not in component, key
+        assert None not in component.values(), key
 
-    published = {}
-    MQTT.event.on(
-        "publish",
-        lambda topic, payload, **_: published.__setitem__(topic, json.loads(payload)),
-    )
-    homeassistant._update_homeassistant_configuration()
-    return published
+
+def test_device_discovery_has_one_component_per_field(homeassistant, static_config):
+    """Every field is an entity, keyed by its name, with its platform."""
+    components = _components(homeassistant)
+
+    assert set(components) == {
+        field["name"] for field in static_config["fields"].values()
+    }
+    for field in static_config["fields"].values():
+        component = components[field["name"]]
+        assert component["platform"] == field["type"]
+        assert component["unique_id"] == f"redreactor_redreactor_{field['name']}"
 
 
 def test_discovery_includes_power_and_charging(homeassistant):
     """Power is a watt sensor and charging a battery_charging binary sensor."""
-    published = _discovery_payloads(homeassistant)
+    components = _components(homeassistant)
 
-    power = published["homeassistant/sensor/redreactor_redreactor_power/config"]
+    power = components["power"]
     assert power["device_class"] == "power"
     assert power["unit_of_measurement"] == "W"
     assert power["state_class"] == "measurement"
 
-    charging = published[
-        "homeassistant/binary_sensor/redreactor_redreactor_charging/config"
-    ]
+    charging = components["charging"]
     assert charging["device_class"] == "battery_charging"
     assert charging["entity_category"] == "diagnostic"
     assert charging["payload_on"] == "ON"
     assert charging["value_template"] == "{{ value_json.charging }}"
 
 
-def test_cpu_stat_raw_has_no_state_class(homeassistant):
-    """A bitmask should not get long-term statistics."""
-    published = _discovery_payloads(homeassistant)
+def test_discovery_includes_under_voltage_and_throttled(homeassistant):
+    """Under-voltage and throttling are diagnostic problem binary sensors."""
+    components = _components(homeassistant)
 
-    raw = published["homeassistant/sensor/redreactor_redreactor_cpu_stat_raw/config"]
-    assert "state_class" not in raw
+    for key in ("under_voltage", "throttled"):
+        sensor = components[key]
+        assert sensor["platform"] == "binary_sensor"
+        assert sensor["device_class"] == "problem"
+        assert sensor["entity_category"] == "diagnostic"
+        assert sensor["value_template"] == f"{{{{ value_json.{key} }}}}"
+
+    assert "cpu_stat_raw" not in components
 
 
-def test_discovery_omits_entity_id_by_default(homeassistant):
-    """Without configuration Home Assistant picks the entity ID itself."""
-    published = _discovery_payloads(homeassistant)
+def test_discovery_includes_power_event(homeassistant):
+    """Power events are an event entity on their own topic, without expiry."""
+    event = _components(homeassistant)["power_event"]
 
-    for payload in published.values():
-        assert "object_id" not in payload
-        assert "default_entity_id" not in payload
+    assert event["platform"] == "event"
+    assert event["state_topic"] == "redreactor/redreactor/event"
+    assert event["event_types"] == [
+        "power_lost",
+        "power_restored",
+        "low_battery",
+        "shutdown_started",
+    ]
+    assert "value_template" not in event
+    assert "expire_after" not in event
+
+
+def test_discovery_sets_default_entity_id_from_device_and_field(homeassistant):
+    """Without configuration the entity ID is the device name and field name."""
+    components = _components(homeassistant)
+
+    assert components["voltage"]["default_entity_id"] == (
+        "sensor.red_reactor_red_reactor_voltage"
+    )
+    assert components["battery_warning_threshold"]["default_entity_id"] == (
+        "number.red_reactor_red_reactor_battery_warning_threshold"
+    )
+    assert components["power_event"]["default_entity_id"] == (
+        "event.red_reactor_red_reactor_power_event"
+    )
+    for component in components.values():
+        assert "object_id" not in component
+
+
+def test_default_entity_id_is_slugified(static_config, dynamic_config):
+    """A device name with spaces and symbols makes a valid entity ID."""
+    from redreactor.components.homeassistant import Homeassistant
+
+    static_config["hostname"]["pretty"] = "Garage Pi #2"
+    components = _components(Homeassistant(static_config, dynamic_config))
+
+    assert components["voltage"]["default_entity_id"] == (
+        "sensor.red_reactor_garage_pi_2_voltage"
+    )
 
 
 def test_default_entity_id_is_published(static_config, dynamic_config):
@@ -216,10 +311,9 @@ def test_default_entity_id_is_published(static_config, dynamic_config):
     from redreactor.components.homeassistant import Homeassistant
 
     static_config["fields"]["voltage"]["default_entity_id"] = "sensor.ups_voltage"
-    published = _discovery_payloads(Homeassistant(static_config, dynamic_config))
+    components = _components(Homeassistant(static_config, dynamic_config))
 
-    voltage = published["homeassistant/sensor/redreactor_redreactor_voltage/config"]
-    assert voltage["default_entity_id"] == "sensor.ups_voltage"
+    assert components["voltage"]["default_entity_id"] == "sensor.ups_voltage"
 
 
 def test_object_id_is_converted_to_default_entity_id(
@@ -233,11 +327,8 @@ def test_object_id_is_converted_to_default_entity_id(
     static_config["fields"]["external_power"]["object_id"] = "ups_power"
     with caplog.at_level("WARNING", "Red Reactor"):
         homeassistant = Homeassistant(static_config, dynamic_config)
-    published = _discovery_payloads(homeassistant)
+    external_power = _components(homeassistant)["external_power"]
 
-    external_power = published[
-        "homeassistant/binary_sensor/redreactor_redreactor_external_power/config"
-    ]
     assert external_power["default_entity_id"] == "binary_sensor.ups_power"
     assert "object_id" not in external_power
     assert "deprecated" in caplog.text
@@ -245,11 +336,8 @@ def test_object_id_is_converted_to_default_entity_id(
 
 def test_discovery_includes_battery_capacity(homeassistant):
     """The battery capacity is a number entity in mAh with a command topic."""
-    published = _discovery_payloads(homeassistant)
+    capacity = _components(homeassistant)["battery_capacity"]
 
-    capacity = published[
-        "homeassistant/number/redreactor_redreactor_battery_capacity/config"
-    ]
     assert capacity["command_topic"] == "redreactor/redreactor/set/battery_capacity"
     assert capacity["unit_of_measurement"] == "mAh"
     assert (capacity["min"], capacity["max"], capacity["step"]) == (0, 20000, 1)
@@ -257,11 +345,51 @@ def test_discovery_includes_battery_capacity(homeassistant):
 
 def test_discovery_includes_battery_time_remaining(homeassistant):
     """The time remaining is a duration sensor in days."""
-    published = _discovery_payloads(homeassistant)
+    remaining = _components(homeassistant)["battery_time_remaining"]
 
-    remaining = published[
-        "homeassistant/sensor/redreactor_redreactor_battery_time_remaining/config"
-    ]
     assert remaining["unit_of_measurement"] == "d"
     assert remaining["device_class"] == "duration"
     assert remaining["value_template"] == "{{ value_json.battery_time_remaining }}"
+
+
+def test_first_discovery_migrates_the_old_entity_topics(homeassistant, static_config):
+    """The old per-entity topics are migrated before the device discovery."""
+    import json
+
+    with patch(
+        "redreactor.components.homeassistant.homeassistant.threading.Timer",
+    ) as timer:
+        published = _published(homeassistant, migrated=False)
+
+    legacy = [
+        f"homeassistant/{field['type']}/redreactor_redreactor_{field['name']}/config"
+        for field in static_config["fields"].values()
+    ]
+    removed = "homeassistant/sensor/redreactor_redreactor_cpu_stat_raw/config"
+
+    # The removed raw CPU stat sensor is deleted, the rest are migrated
+    assert published[0] == (removed, "", {})
+    assert published[1:] == [
+        (topic, json.dumps({"migrate_discovery": True}), {}) for topic in legacy
+    ]
+    assert homeassistant._migrated is True
+
+    # After a delay the device discovery is sent and the old topics cleared
+    delay, finish = timer.call_args.args
+    from redreactor.const import HOMEASSISTANT_MIGRATION_DELAY
+
+    assert delay == HOMEASSISTANT_MIGRATION_DELAY
+    published.clear()
+    finish()
+    assert published[0][0] == DEVICE_TOPIC
+    assert published[1:] == [(topic, "", {"retain": True}) for topic in legacy]
+
+
+def test_migration_runs_only_once(homeassistant):
+    """Later discovery updates only publish the device discovery."""
+    with patch("redreactor.components.homeassistant.homeassistant.threading.Timer"):
+        _published(homeassistant, migrated=False)
+
+    published = _published(homeassistant, migrated=True)
+
+    assert [topic for topic, _, _ in published] == [DEVICE_TOPIC]

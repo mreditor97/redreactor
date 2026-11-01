@@ -103,10 +103,13 @@ class MQTT:
         self._client.on_disconnect = self._mqtt_on_disconnect
         self._client.on_message = self._mqtt_on_message
 
-        self._client.username_pw_set(
-            static_configuration["mqtt"]["user"],
-            static_configuration["mqtt"]["password"],
-        )
+        # An empty user connects anonymously. Sending an empty username would
+        # be treated by some brokers as a login with that name.
+        if static_configuration["mqtt"]["user"]:
+            self._client.username_pw_set(
+                static_configuration["mqtt"]["user"],
+                static_configuration["mqtt"]["password"] or None,
+            )
 
         self._configure_tls(static_configuration["mqtt"].get("tls") or {})
 

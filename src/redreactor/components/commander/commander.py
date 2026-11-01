@@ -16,7 +16,10 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 from redreactor.components.mqtt import MQTT
-from redreactor.const import DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP
+from redreactor.const import (
+    DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
+    POWER_EVENT_SHUTDOWN_STARTED,
+)
 from redreactor.helpers.emitter import EventEmitter
 
 if TYPE_CHECKING:
@@ -48,6 +51,9 @@ class Commander:
         self._static_configuration = static_configuration
         self._dynamic_configuration = dynamic_configuration
         self._monitor = monitor
+        # Held from the first shutdown or restart until the program exits, so
+        # a repeated low battery reading or button press doesn't run it twice
+        self._command_lock = threading.Lock()
 
         self.logger.debug("Setup the command handler")
 
@@ -129,8 +135,7 @@ class Commander:
         for field in self._static_configuration["fields"]:
             # If the received command is of type button
             if (
-                self._static_configuration["fields"][field]["type"]
-                == "button"
+                self._static_configuration["fields"][field]["type"] == "button"
                 and topic == self._static_configuration["fields"][field]["name"]
             ):
                 self.logger.info(
@@ -149,8 +154,7 @@ class Commander:
 
             # If the received command is of type number
             if (
-                self._static_configuration["fields"][field]["type"]
-                == "number"
+                self._static_configuration["fields"][field]["type"] == "number"
                 and topic == self._static_configuration["fields"][field]["name"]
             ):
                 self.logger.info(
@@ -212,14 +216,18 @@ class Commander:
         # pair would stop the battery from ever reading 0% (and shutting down).
         if field in {"battery_voltage_minimum", "battery_voltage_maximum"}:
             voltage_minimum = float(
-                value
-                if field == "battery_voltage_minimum"
-                else self._dynamic_configuration.data["battery_voltage_minimum"],
+                (
+                    value
+                    if field == "battery_voltage_minimum"
+                    else self._dynamic_configuration.data["battery_voltage_minimum"]
+                ),
             )
             voltage_maximum = float(
-                value
-                if field == "battery_voltage_maximum"
-                else self._dynamic_configuration.data["battery_voltage_maximum"],
+                (
+                    value
+                    if field == "battery_voltage_maximum"
+                    else self._dynamic_configuration.data["battery_voltage_maximum"]
+                ),
             )
             if (
                 voltage_minimum
@@ -247,11 +255,23 @@ class Commander:
             msg = "Invalid device command."
             raise ValueError(msg)
 
+        if not self._command_lock.acquire(blocking=False):
+            self.logger.info("Device %s ignored, already shutting down", event_type)
+            return
+
         self.logger.info(
             "Device %s has been called. Last running at %s",
             event_type,
             datetime.now(tz=UTC).strftime("%H:%M:%S"),
         )
+
+        if event_type == "shutdown":
+            # Lets Home Assistant automations react before the device goes
+            # offline, whether a low battery or the button started it
+            self._monitor.publish_event(POWER_EVENT_SHUTDOWN_STARTED)
+
+        # Stop the readings, so nothing publishes online after the offline below
+        self._monitor.stop()
 
         # Publish to MQTT the offline state, before shutting down or restarting
         MQTT.event.emit(

@@ -25,8 +25,15 @@ from redreactor.const import (
     DEFAULT_REPORT_INTERVAL,
     DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS,
     HOURS_PER_DAY,
+    POWER_EVENT_LOW_BATTERY,
+    POWER_EVENT_POWER_LOST,
+    POWER_EVENT_POWER_RESTORED,
 )
 from redreactor.helpers.cpu_utils import (
+    FREQ_CAPPED_BIT,
+    SOFT_TEMP_LIMIT_BIT,
+    THROTTLED_BIT,
+    UNDER_VOLTAGE_BIT,
     decode_cpu_stat_text,
     read_cpu_stat,
     read_cpu_temperature,
@@ -38,6 +45,16 @@ if TYPE_CHECKING:
     from paho.mqtt.client import Client
 
     from redreactor.configuration import DynamicConfiguration
+
+
+# Throttling bitmask bits for the under-voltage and throttled binary sensors.
+# Throttled covers every way the CPU is slowed: frequency capped, throttled and
+# the soft temperature limit. Only the current state bits are used, not the
+# "has occurred since boot" history bits.
+UNDER_VOLTAGE_MASK = 1 << UNDER_VOLTAGE_BIT
+THROTTLED_MASK = (
+    (1 << FREQ_CAPPED_BIT) | (1 << THROTTLED_BIT) | (1 << SOFT_TEMP_LIMIT_BIT)
+)
 
 
 def read_once(static_configuration: dict[str, Any]) -> dict[str, Any]:
@@ -61,8 +78,9 @@ def read_once(static_configuration: dict[str, Any]) -> dict[str, Any]:
             "i2c_bus": int(ina_configuration["bus"]),
             "i2c_address": hex(ina_configuration["address"]),
             "voltage": round(ina.voltage(), 3),
-            # Published negative while discharging, positive while charging
-            "current": round(-current, 4),
+            # Published negative while discharging, positive while charging.
+            # Adding 0.0 turns -0.0 (a zero reading negated) into 0.0
+            "current": round(-current, 4) + 0.0,
             "power": round(ina.power() / 1000, 3),
             "charging": current < 0,
         }
@@ -97,6 +115,13 @@ class Monitor:
 
     # Whether the first reading after start up has been checked
     _start_up_checked: bool = False
+
+    # Whether the low battery shutdown has been started
+    _shutdown_emitted: bool = False
+
+    # Set when shutting down or restarting, nothing more is published so the
+    # retained status stays offline
+    _stopped: bool = False
 
     # Whether the INA219 has been read at least once since start up
     _has_reading: bool = False
@@ -144,6 +169,8 @@ class Monitor:
         )
         self._has_reading = False
         self._report_pending = False
+        self._shutdown_emitted = False
+        self._stopped = False
         # Guards the two flags above, which the MQTT thread and the monitor
         # timer thread both use
         self._report_lock = Lock()
@@ -224,11 +251,14 @@ class Monitor:
                 # reporting the current as the configured maximum.
                 # Assume no external power so the device will still shutdown on a low voltage reading # noqa: E501
                 self.logger.exception("Battery current range error")
-                self.data.external_power = False
+                self._set_external_power(external_power=False, update=False)
                 self.data.charging = False
                 self.data.current = (
                     float(self._static_configuration["ina"]["max_expected_amps"]) * 1000
                 )
+                # power() would raise the same error, so estimate it from the
+                # voltage and the capped current rather than keep a stale value
+                self.data.power = self.data.voltage * self.data.current / 1000
                 # The real current is unknown, so the voltage can't be
                 # corrected for the load
                 self.data.battery_level = self._average_battery_level(
@@ -248,19 +278,12 @@ class Monitor:
                 #   0-10 mA  -- float charge (battery full, power present)
                 #   negative -- actively charging (power just reconnected)
                 if self.data.current > 10:
-                    if self.data.external_power:
-                        # Transition: power just removed
-                        self.data.external_power = False
-                        self._update()
-                elif self.data.current >= 0:
-                    if not self.data.external_power:
-                        # Transition: power restored, battery now floating
-                        self.data.external_power = True
-                        self._update()
-                elif not self.data.external_power:
-                    # Transition: power restored, battery actively charging
-                    self.data.external_power = True
-                    self._update()
+                    # Power removed
+                    self._set_external_power(external_power=False)
+                else:
+                    # Power restored, the battery is floating (0-10 mA) or
+                    # actively charging (negative)
+                    self._set_external_power(external_power=True)
 
         # Voltage above the nominal maximum indicates external power is present
         # (e.g. charger connected but INA219 current read was noisy/stale).
@@ -268,11 +291,9 @@ class Monitor:
         if (
             self.data.voltage
             > self.data.battery_voltage_maximum + DEFAULT_BATTERY_VOLTAGE_HEADROOM
-            and not self.data.external_power
         ):
-            # Transition: power detected from voltage, publish it straight away
-            self.data.external_power = True
-            self._update()
+            # Power detected from the voltage, published straight away
+            self._set_external_power(external_power=True)
 
         if ina and not self._start_up_checked:
             self._start_up_checked = True
@@ -290,6 +311,8 @@ class Monitor:
             self._update()
 
             self._empty_readings += 1
+            if self._empty_readings == 1:
+                self.publish_event(POWER_EVENT_LOW_BATTERY)
             shutdown = self._empty_readings >= DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS
             if not shutdown:
                 self.logger.warning(
@@ -304,8 +327,9 @@ class Monitor:
         else:
             self._empty_readings = 0
 
-        # Shutdown system
-        if shutdown:
+        # Shutdown system, once, the readings carry on while it runs
+        if shutdown and not self._shutdown_emitted:
+            self._shutdown_emitted = True
             self.logger.warning(
                 "Forcing system shutdown, going offline with %fV",
                 round(self.data.voltage, 2),
@@ -313,6 +337,54 @@ class Monitor:
 
             # Emit the shutdown event
             self.event.emit("shutdown")
+
+    def _set_external_power(
+        self,
+        *,
+        external_power: bool,
+        update: bool = True,
+    ) -> None:
+        """Record the external power state, publishing it when it changes.
+
+        A change after the first reading is also sent as a power lost or power
+        restored event. The first reading only sets the starting state, which
+        isn't a change of power.
+        """
+        if self.data.external_power == external_power:
+            return
+
+        self.data.external_power = external_power
+
+        if self._has_reading:
+            self.publish_event(
+                (
+                    POWER_EVENT_POWER_RESTORED
+                    if external_power
+                    else POWER_EVENT_POWER_LOST
+                ),
+            )
+
+        if update:
+            self._update()
+
+    def publish_event(self, event_type: str) -> None:
+        """Publish a power event, such as power lost, for Home Assistant.
+
+        Events aren't retained, an old one replayed on reconnect would trigger
+        automations again.
+        """
+        if self._stopped:
+            return
+
+        self.logger.info("Power event: %s", event_type)
+
+        MQTT.event.emit(
+            event_name="publish",
+            topic=f"{self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['event']}",
+            payload=json.dumps({"event_type": event_type}),
+            qos=1,
+            retain=False,
+        )
 
     def _report_if_pending(self) -> None:
         """Report the first reading if MQTT connected before it was taken."""
@@ -515,8 +587,20 @@ class Monitor:
             self.data.cpu_stat_raw = None
             self.data.cpu_stat_text = None
 
+    def stop(self) -> None:
+        """Stop reading and publishing, before a shutdown or restart.
+
+        Otherwise a reading taken while the device shuts down would publish the
+        online status again after the offline one.
+        """
+        self._stopped = True
+        self.monitor_timer.stop()
+        self.report_timer.stop()
+
     def _update(self) -> None:
         """Pushes the latest data to Monitor endpoint."""
+        if self._stopped:
+            return
         # Force a update of the dynamic configuration values
         self._update_dynamic_configuration()
 
@@ -547,10 +631,12 @@ class Monitor:
                     # The INA219 reads the discharge current as positive. It is
                     # published the other way round, negative while the battery
                     # is discharging and positive while it is charging.
+                    # Adding 0.0 turns -0.0 (a zero reading negated) into 0.0
                     f"{self._static_configuration['fields']['current']['name']}": round(
                         -self.data.current,
                         4,
-                    ),
+                    )
+                    + 0.0,
                     f"{self._static_configuration['fields']['power']['name']}": round(
                         self.data.power,
                         3,
@@ -581,7 +667,14 @@ class Monitor:
                         )
                     ),
                     f"{self._static_configuration['fields']['cpu_temperature']['name']}": self.data.cpu_temperature,  # noqa: E501
-                    f"{self._static_configuration['fields']['cpu_stat_raw']['name']}": self.data.cpu_stat_raw,  # noqa: E501
+                    f"{self._static_configuration['fields']['under_voltage']['name']}": self._cpu_stat_payload(  # noqa: E501
+                        "under_voltage",
+                        UNDER_VOLTAGE_MASK,
+                    ),
+                    f"{self._static_configuration['fields']['throttled']['name']}": self._cpu_stat_payload(  # noqa: E501
+                        "throttled",
+                        THROTTLED_MASK,
+                    ),
                     f"{self._static_configuration['fields']['cpu_stat_text']['name']}": self.data.cpu_stat_text,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_warning_threshold']['name']}": self.data.battery_warning_threshold,  # noqa: E501
                     f"{self._static_configuration['fields']['battery_voltage_minimum']['name']}": self.data.battery_voltage_minimum,  # noqa: E501
@@ -597,6 +690,19 @@ class Monitor:
             # them unavailable if this device drops off.
             retain=True,
         )
+
+    def _cpu_stat_payload(self, field: str, mask: int) -> str | None:
+        """Return a binary sensor payload for bits of the throttling bitmask.
+
+        None (unknown in Home Assistant) when the bitmask couldn't be read.
+        """
+        if self.data.cpu_stat_raw is None:
+            return None
+
+        field_configuration = self._static_configuration["fields"][field]
+        if self.data.cpu_stat_raw & mask:
+            return str(field_configuration.get("payload_on", "ON"))
+        return str(field_configuration.get("payload_off", "OFF"))
 
     def _update_dynamic_configuration(self) -> None:
         """Update Dynamic Configuration.

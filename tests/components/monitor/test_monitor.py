@@ -839,3 +839,232 @@ def test_reconnect_restarts_report_timer(monitor, mock_ina):
         assert pending.finished.is_set()
     finally:
         monitor.report_timer.stop()
+
+
+# ---------------------------------------------------------------------------
+# Power events
+# ---------------------------------------------------------------------------
+
+
+def _events():
+    """Collect the power events the monitor publishes."""
+    import json
+
+    from redreactor.components.mqtt import MQTT
+
+    events: list[str] = []
+
+    def on_publish(topic: str, payload: str, **kwargs: object) -> None:
+        if topic == "redreactor/redreactor/event":
+            assert kwargs == {"qos": 1, "retain": False}
+            events.append(json.loads(payload)["event_type"])
+
+    MQTT.event.on("publish", on_publish)
+    return events
+
+
+def test_first_reading_sends_no_power_event(monitor, mock_ina):
+    """The first reading only sets the starting state, it isn't a change."""
+    events = _events()
+
+    with patch.object(monitor, "_update_cpu_information"):
+        _run_monitor_with_ina(monitor, mock_ina, voltage=3.7, current=500.0)
+
+    assert monitor.data.external_power is False
+    assert events == []
+
+
+def test_power_lost_and_restored_events(monitor, mock_ina):
+    """Power being removed and returning are sent as events."""
+    events = _events()
+
+    with patch.object(monitor, "_update_cpu_information"):
+        _run_monitor_with_ina(monitor, mock_ina, voltage=4.0, current=-300.0)
+        _run_monitor_with_ina(monitor, mock_ina, voltage=4.0, current=500.0)
+        _run_monitor_with_ina(monitor, mock_ina, voltage=4.0, current=500.0)
+        _run_monitor_with_ina(monitor, mock_ina, voltage=4.0, current=5.0)
+
+    assert events == ["power_lost", "power_restored"]
+
+
+def test_power_restored_from_voltage_sends_event(monitor, mock_ina):
+    """Power detected from a voltage above the maximum is sent as an event."""
+    events = _events()
+
+    with patch.object(monitor, "_update_cpu_information"):
+        _run_monitor_with_ina(monitor, mock_ina, voltage=4.0, current=500.0)
+        monitor._has_reading = True
+        # Noisy current reading, but the voltage shows a charger is connected
+        _run_monitor_with_ina(monitor, mock_ina, voltage=4.3, current=50.0)
+
+    assert "power_restored" in events
+
+
+def test_low_battery_event_is_sent_once(monitor, mock_ina):
+    """Low battery is sent on the first reading at the shutdown level only."""
+    events = _events()
+
+    with patch.object(monitor, "_update_cpu_information"):
+        _run_monitor_with_ina(monitor, mock_ina, voltage=4.0, current=500.0)
+        for _ in range(DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS - 1):
+            _run_monitor_with_ina(
+                monitor,
+                mock_ina,
+                voltage=DEFAULT_BATTERY_VOLTAGE_MINIMUM,
+                current=500.0,
+            )
+
+    assert events.count("low_battery") == 1
+
+
+def test_device_range_error_sends_power_lost(monitor, mock_ina):
+    """An over-current reading counts as power lost after the first reading."""
+    from ina219 import DeviceRangeError
+
+    events = _events()
+
+    with patch.object(monitor, "_update_cpu_information"):
+        _run_monitor_with_ina(monitor, mock_ina, voltage=4.0, current=5.0)
+        mock_ina.current.side_effect = DeviceRangeError(6000)
+        monitor._monitor(ina=mock_ina)
+
+    assert events == ["power_lost"]
+
+
+# ---------------------------------------------------------------------------
+# Fixes
+# ---------------------------------------------------------------------------
+
+
+def test_device_range_error_estimates_power(monitor, mock_ina):
+    """Power is worked out from the capped current instead of left stale."""
+    from ina219 import DeviceRangeError
+
+    monitor.data.power = 99.0
+    mock_ina.voltage.return_value = 4.0
+    mock_ina.current.side_effect = DeviceRangeError(6000)
+
+    with patch.object(monitor, "_update"):
+        monitor._monitor(ina=mock_ina)
+
+    # 4.0 V x 5.5 A (max_expected_amps)
+    assert monitor.data.power == pytest.approx(22.0)
+
+
+def test_zero_current_is_not_published_as_negative_zero(monitor, mock_ina):
+    """A 0 mA reading is published as 0.0, not -0.0."""
+    from redreactor.components.mqtt import MQTT
+
+    published = {}
+    MQTT.event.on(
+        "publish",
+        lambda topic, payload, **_: published.__setitem__(topic, payload),
+    )
+
+    with patch.object(monitor, "_update_cpu_information"):
+        _run_monitor_with_ina(monitor, mock_ina, voltage=3.7, current=0.0)
+        monitor._update()
+
+    assert '"current": 0.0' in published["redreactor/redreactor/state"]
+
+
+def test_read_once_does_not_return_negative_zero(static_config, mock_ina):
+    """`--check` prints a 0 mA reading as 0.0."""
+    import math
+
+    from redreactor.components.monitor import read_once
+
+    mock_ina.current.return_value = 0.0
+    with patch("redreactor.components.monitor.monitor.INA219", return_value=mock_ina):
+        reading = read_once(static_config)
+
+    assert reading["current"] == 0.0
+    assert math.copysign(1, reading["current"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Under-voltage and throttled
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("cpu_stat_raw", "under_voltage", "throttled"),
+    [
+        (0x0, "OFF", "OFF"),
+        (0x1, "ON", "OFF"),
+        (0x2, "OFF", "ON"),  # Frequency capped
+        (0x4, "OFF", "ON"),  # Throttled
+        (0x8, "OFF", "ON"),  # Soft temperature limit
+        (0x5, "ON", "ON"),
+        # Only "has occurred since boot" history bits, nothing happening now
+        (0x50000, "OFF", "OFF"),
+        (None, None, None),
+    ],
+)
+def test_state_payload_under_voltage_and_throttled(
+    monitor,
+    cpu_stat_raw,
+    under_voltage,
+    throttled,
+):
+    """The throttling bitmask is published as two binary sensor states."""
+    import json
+
+    from redreactor.components.mqtt import MQTT
+
+    published = {}
+    MQTT.event.on(
+        "publish",
+        lambda topic, payload, **_: published.__setitem__(topic, payload),
+    )
+    with (
+        patch(
+            "redreactor.components.monitor.monitor.read_cpu_stat",
+            return_value=cpu_stat_raw,
+        ),
+        patch(
+            "redreactor.components.monitor.monitor.read_cpu_temperature",
+            return_value=50.0,
+        ),
+    ):
+        monitor._update()
+
+    state = json.loads(published["redreactor/redreactor/state"])
+    assert state["under_voltage"] == under_voltage
+    assert state["throttled"] == throttled
+    assert "cpu_stat_raw" not in state
+
+
+def test_low_battery_shutdown_is_emitted_once(monitor, mock_ina):
+    """Readings carry on while shutting down, the shutdown starts only once."""
+    shutdowns: list[bool] = []
+    monitor.event.on("shutdown", lambda: shutdowns.append(True))
+
+    with patch.object(monitor, "_update"):
+        for _ in range(DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS + 3):
+            _run_monitor_with_ina(
+                monitor,
+                mock_ina,
+                voltage=DEFAULT_BATTERY_VOLTAGE_MINIMUM,
+                current=500.0,
+            )
+
+    assert shutdowns == [True]
+
+
+def test_stop_ends_publishing(monitor, mock_ina):
+    """After stop nothing is published, so the offline status stays last."""
+    from redreactor.components.mqtt import MQTT
+
+    published: list[str] = []
+    MQTT.event.on("publish", lambda topic, **_: published.append(topic))
+
+    monitor.stop()
+    with patch.object(monitor, "_update_cpu_information"):
+        monitor._update()
+        monitor.publish_event("power_lost")
+        _run_monitor_with_ina(monitor, mock_ina, voltage=3.0, current=500.0)
+
+    assert published == []
+    assert monitor.monitor_timer.is_running is False
+    assert monitor.report_timer.is_running is False

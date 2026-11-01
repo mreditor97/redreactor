@@ -19,7 +19,7 @@ Functionality includes:
   - Charging Status
   - CPU Temperature
   - CPU Status
-  - CPU Status Raw
+  - Under-voltage and Throttled problem states
   - Battery Warning Threshold
   - Battery Voltage Minimum and Maximum
   - Report Interval
@@ -29,6 +29,7 @@ Functionality includes:
   - Change the Battery Warning Threshold
   - Change the Battery Voltage Minimum and Maximum
   - Change the Report Interval
+- Power events (power lost, power restored, low battery, shutdown started) for automations
 - Optional TLS for the MQTT connection
 - A `--check` option that reads the Red Reactor once and exits, to test the I2C setup
 - Provides `systemd` service example, so it can be started as a service on system boot
@@ -38,6 +39,10 @@ If you haven't already got yourself a Red Reactor (An uninterruptible battery po
 ## Home Assistant
 
 Connecting your Home Assistant instance to the same MQTT Broker as your Red Reactor will allow your Red Reactor to be auto discovered by your Home Assistant instance. It will give you access to all the readings available from the Red Reactor sensors, and allows full configuration of the Red Reactor on the fly - it even adds the ability to reboot and shutdown your device at the push of a button.
+
+The Red Reactor uses Home Assistant's device discovery, one message on `homeassistant/device/redreactor_<hostname>/config` that holds every entity. Versions before this published one message per entity. On start it moves Home Assistant over using its migration steps, so existing entities keep their entity IDs, names and history. The old raw CPU stat sensor is removed, replaced by the Under-voltage and Throttled binary sensors. New entities get entity IDs from the device and field name, such as `sensor.red_reactor_pi_voltage`.
+
+The Power event entity fires `power_lost`, `power_restored`, `low_battery` (the first reading at the battery shutdown level, on battery) and `shutdown_started` (a low battery or Shutdown button shutdown), so an automation can notify you without watching other entities.
 
 When Home Assistant restarts it publishes `online` to `homeassistant/status`. The Red Reactor listens for this and sends its discovery configuration and latest readings straight away, rather than leaving the entities unknown until the next report. If your Home Assistant MQTT integration uses a different birth message, set `homeassistant.status_topic` and `homeassistant.status_online` in the configuration file to match.
 
@@ -59,7 +64,8 @@ Topic `redreactor/your-configured-hostname/state`
   "charging": "OFF",
   "cpu_temperature": 49.1,
   "cpu_stat": "OK",
-  "cpu_stat_raw": 0,
+  "under_voltage": "OFF",
+  "throttled": "OFF",
   "battery_warning_threshold": 10,
   "battery_voltage_minimum": 2.6,
   "battery_voltage_maximum": 4.2,
@@ -79,7 +85,8 @@ Topic `redreactor/your-configured-hostname/state`
 - `charging` is whether the batteries are currently being charged
 - `cpu_temperature` read via `cat /sys/class/thermal/thermal_zone0/temp` gets the CPU Temperature
 - `cpu_stat` read via `cat /sys/devices/platform/soc/soc:firmware/get_throttled` gets the CPU Stat in a human readable format
-- `cpu_stat_raw` read via `cat /sys/devices/platform/soc/soc:firmware/get_throttled` gets the CPU Stat
+- `under_voltage` is `ON` while the Raspberry Pi reports under-voltage now, from the same throttling state as `cpu_stat`. `null` when it can't be read
+- `throttled` is `ON` while the CPU is slowed down now: frequency capped, throttled, or at the soft temperature limit. `null` when it can't be read
 - `battery_warning_threshold` is the battery percentage at or below which, while running on battery, a safe shutdown of the device is started (after 3 consecutive readings, so a brief voltage dip doesn't trigger it). If the device starts up below this level while charging it stays on; without external power it shuts down again
 - `battery_voltage_minimum` is the voltage at which is to be considered the lowest allowable before initiating a safe shutdown
 - `battery_voltage_maximum` is the voltage at which is to be considered the maximum at which the battery can be (this is used in the calculation of the `battery_level`)
@@ -92,6 +99,12 @@ Topic `redreactor/your-configured-hostname/state`
 Topic `redreactor/hostname/status`
 
 Data `online` or `offline`
+
+### Event
+
+Topic `redreactor/your-configured-hostname/event`
+
+Data `{"event_type": "power_lost"}`, with `power_lost`, `power_restored`, `low_battery` or `shutdown_started`. Not retained, so an old event isn't replayed when Home Assistant reconnects.
 
 ### Command
 
@@ -111,6 +124,7 @@ Command topic | value:
 
 `extras/config.yaml` is an example configuration file. Some options that are not in it:
 
+- `mqtt.user` and `mqtt.password` default to empty, which connects anonymously. Set both for a broker that needs a login
 - `ina.bus` is the I2C bus the Red Reactor is on (default `1`)
 - `mqtt.tls` turns on TLS for the MQTT connection:
 

@@ -276,3 +276,30 @@ def test_tls_configuration_error_exits(static_config):
             MQTT(static_config, exit_on_fail=False)
 
     assert exit_info.value.code == 1
+
+
+def test_login_is_set_when_a_user_is_configured(static_config):
+    """A configured user and password are sent to the broker."""
+    _, client = _make_mqtt(static_config)
+
+    client.username_pw_set.assert_called_once_with("test", "test")
+
+
+@pytest.mark.parametrize("user", ["", None])
+def test_empty_user_connects_anonymously(static_config, user):
+    """Without a user no login is sent, rather than an empty username."""
+    static_config["mqtt"]["user"] = user
+    static_config["mqtt"]["password"] = ""
+
+    _, client = _make_mqtt(static_config)
+
+    client.username_pw_set.assert_not_called()
+
+
+def test_user_without_password_sends_no_password(static_config):
+    """A user with an empty password logs in with no password."""
+    static_config["mqtt"]["password"] = ""
+
+    _, client = _make_mqtt(static_config)
+
+    client.username_pw_set.assert_called_once_with("test", None)

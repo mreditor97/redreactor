@@ -126,9 +126,9 @@ class Base(Representer):
     device: Device | None
     enabled_by_default: bool | None
 
-    configuration_topic: (
-        str | None
-    )  # Used for one time creation of the Home Assistant configuration topic
+    configuration_topic: str | None  # The legacy per-entity discovery topic
+    platform: str | None  # The entity type in the device discovery message
+    component_id: str | None  # The entity's key in the device discovery message
 
     def __init__(  # noqa: PLR0913, PLR0917
         self,
@@ -146,6 +146,8 @@ class Base(Representer):
         device: Device | None = None,
         enabled_by_default: bool | None = None,
         configuration_topic: str | None = None,
+        platform: str | None = None,
+        component_id: str | None = None,
     ) -> None:
         """Initialise Home Assistant Base object."""
         self.name = name
@@ -163,3 +165,5 @@ class Base(Representer):
         self.enabled_by_default = enabled_by_default
 
         self.configuration_topic = configuration_topic
+        self.platform = platform
+        self.component_id = component_id
