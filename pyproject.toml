@@ -18,7 +18,6 @@ dependencies = [
   "pi-ina219 >= 1.4.1",
   "paho-mqtt >= 2.0.0",
   "pyyaml >= 6.0",
-  "requests >= 2.32.4",
 ]
 
 [project.urls]

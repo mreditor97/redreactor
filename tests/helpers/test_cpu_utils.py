@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 
 from redreactor.helpers.cpu_utils import (
     decode_cpu_stat_text,
-    read_cpu_stat_hassos,
     read_cpu_stat_inferred,
     read_cpu_stat_sysfs,
     read_cpu_stat_vcgencmd,
@@ -138,55 +137,6 @@ def test_read_cpu_stat_vcgencmd_returns_none_when_absent():
     """read_cpu_stat_vcgencmd returns None when vcgencmd is not present."""
     with patch("redreactor.helpers.cpu_utils.Path.exists", return_value=False):
         result = read_cpu_stat_vcgencmd()
-    assert result is None
-
-
-# ---------------------------------------------------------------------------
-# read_cpu_stat_hassos
-# ---------------------------------------------------------------------------
-
-
-def test_read_cpu_stat_hassos_returns_none_without_token(monkeypatch):
-    """read_cpu_stat_hassos returns None when SUPERVISOR_TOKEN is not set."""
-    monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
-    result = read_cpu_stat_hassos()
-    assert result is None
-
-
-def test_read_cpu_stat_hassos_parses_throttling(monkeypatch):
-    """read_cpu_stat_hassos builds a bitmask from throttling JSON."""
-    monkeypatch.setenv("SUPERVISOR_TOKEN", "fake-token")
-
-    mock_response = MagicMock()
-    mock_response.json.return_value = {
-        "data": {
-            "chassis": {
-                "throttling": {
-                    "under_voltage": True,
-                    "frequency_capped": False,
-                    "throttled": False,
-                    "soft_temp_limit": False,
-                },
-            },
-        },
-    }
-
-    with patch("requests.get", return_value=mock_response):
-        result = read_cpu_stat_hassos()
-
-    assert result == 0b0001  # under_voltage bit only
-
-
-def test_read_cpu_stat_hassos_returns_none_on_missing_key(monkeypatch):
-    """read_cpu_stat_hassos returns None when throttling key is absent."""
-    monkeypatch.setenv("SUPERVISOR_TOKEN", "fake-token")
-
-    mock_response = MagicMock()
-    mock_response.json.return_value = {"data": {}}
-
-    with patch("requests.get", return_value=mock_response):
-        result = read_cpu_stat_hassos()
-
     assert result is None
 
 

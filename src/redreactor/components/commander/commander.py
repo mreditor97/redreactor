@@ -128,7 +128,7 @@ class Commander:
             if (
                 self._static_configuration["fields"][field]["type"]
                 == "button"
-                and field in topic
+                and topic == self._static_configuration["fields"][field]["name"]
             ):
                 self.logger.info(
                     "%s button has been pressed",
@@ -148,7 +148,7 @@ class Commander:
             if (
                 self._static_configuration["fields"][field]["type"]
                 == "number"
-                and field in topic
+                and topic == self._static_configuration["fields"][field]["name"]
             ):
                 self.logger.info(
                     "%s update command received, changing to value %s",

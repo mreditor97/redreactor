@@ -2,12 +2,8 @@
 
 from __future__ import annotations
 
-import json
-import os
 import subprocess
 from pathlib import Path
-
-import requests
 
 # Bit positions in the Raspberry Pi firmware throttling bitmask.
 # Bits 0-3 reflect the CURRENT state; bits 16-19 reflect whether the condition
@@ -131,46 +127,11 @@ def read_cpu_stat_vcgencmd() -> int | None:
     return None
 
 
-def read_cpu_stat_hassos() -> int | None:
-    """Read throttling info via HassOS Supervisor (if available)."""
-    token = os.environ.get("SUPERVISOR_TOKEN")
-    if not token:
-        return None
-
-    try:
-        response = requests.get(
-            "http://supervisor/hardware/info",
-            timeout=5,
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        data = response.json()
-    except (requests.RequestException, ValueError, json.JSONDecodeError):
-        return None
-
-    throttling = data.get("data", {}).get("chassis", {}).get("throttling")
-
-    if not isinstance(throttling, dict):
-        return None
-
-    mask = 0
-    if throttling.get("under_voltage"):
-        mask |= 1 << UNDER_VOLTAGE_BIT
-    if throttling.get("frequency_capped"):
-        mask |= 1 << FREQ_CAPPED_BIT
-    if throttling.get("throttled"):
-        mask |= 1 << THROTTLED_BIT
-    if throttling.get("soft_temp_limit"):
-        mask |= 1 << SOFT_TEMP_LIMIT_BIT
-
-    return mask
-
-
 def read_cpu_stat_inferred() -> int | None:
     """Infer throttling using CPU frequency scaling and thermal data.
 
     Works on Raspberry Pi 4/5 with modern HassOS where:
       - vcgencmd is unavailable
-      - Supervisor has no throttling info
       - sysfs get_throttled does not exist
 
     Sets:
@@ -220,7 +181,6 @@ def read_cpu_stat() -> int | None:
     for method in (
         read_cpu_stat_sysfs,
         read_cpu_stat_vcgencmd,
-        read_cpu_stat_hassos,
         read_cpu_stat_inferred,
     ):
         value = method()
