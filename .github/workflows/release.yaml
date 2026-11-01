@@ -119,11 +119,8 @@ jobs:
             --title "${VERSION}" \
             --notes "Alpha build of ${REF} for the edge app."
       - name: 🚀 Publish to PyPi
-        # Stable and beta (GitHub pre-release) versions go to PyPI, pip only
-        # installs a beta when that exact version is asked for
         if: |
           needs.information.outputs.environment == 'stable'
-          || needs.information.outputs.environment == 'beta'
         env:
           PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
         run: |
