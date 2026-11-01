@@ -137,18 +137,30 @@ By default `battery_level` is a straight line from `battery_voltage_minimum` (0%
 1. **Internal resistance** (`battery.internal_resistance` in the configuration file). The voltage sags under load by about current × resistance, so that is added back before working out the level (and taken off while charging). With the Pi idle, note the voltage and current, then put it under load (for example `stress -c 4`) and note them again. The resistance in mΩ is the voltage drop in mV divided by the current rise in A. This includes the holder, wiring and board as well as the cell, so it is usually higher than the datasheet figure. The default of 35 mΩ is the maximum initial AC impedance in the Samsung INR18650-35E datasheet; as the real value is usually higher, the default under-corrects, which errs towards shutting down early rather than late. With two cells in parallel, measure them together; the result is the combined resistance.
 2. **Voltage curve** (`battery.curve` in the configuration file). Pairs of `[resting voltage, level %]`, with rising voltages. The level is interpolated between them, and the ends are clamped. When a curve is set, `battery_voltage_minimum` and `battery_voltage_maximum` no longer affect the level.
 
+   For example, for a Samsung INR18650-35E:
+
    ```yaml
    battery:
      internal_resistance: 35 # mΩ, your measured value
      average_readings: 6
      curve:
-       - [3.00, 0]
-       - [3.45, 10]
-       # ... the points measured for your battery
-       - [4.15, 100]
+       - [2.80, 0]
+       - [3.08, 5]
+       - [3.25, 10]
+       - [3.39, 15]
+       - [3.44, 20]
+       - [3.55, 30]
+       - [3.63, 40]
+       - [3.71, 50]
+       - [3.80, 60]
+       - [3.89, 70]
+       - [3.99, 80]
+       - [4.06, 90]
+       - [4.08, 95]
+       - [4.16, 100]
    ```
 
-   The values above are placeholders, not a real battery's curve. One way to measure your own is to charge fully, set `battery.internal_resistance`, then run on battery at a steady load until shutdown, and use the voltage history from Home Assistant: with a steady current the charge used is proportional to the time, so the voltage at 10% of the run time is the 90% point, and so on.
+   This curve was read off the 0.2 A discharge trace in the [lygte-info.dk review of the Samsung INR18650-35E](https://lygte-info.dk/review/batteries2012/Samsung%20INR18650-35E%203500mAh%20%28Pink%29%20UK.html), with the level as the share of the 3.40 Ah the cell gave down to 2.8 V. It was read off a chart, so the voltages are approximate (about ±0.01 V), and your own cells will differ a little with age and temperature. No curve is used unless you set one. One way to measure your own is to charge fully, set `battery.internal_resistance`, then run on battery at a steady load until shutdown, and use the voltage history from Home Assistant: with a steady current the charge used is proportional to the time, so the voltage at 10% of the run time is the 90% point, and so on.
 
 The log file is rotated at 1 MB, keeping 3 old files.
 

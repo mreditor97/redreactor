@@ -33,6 +33,27 @@ homeassistant:
   discovery_interval: 120 # Discovery configuration push interval
   expire_after: 120 # Adds a MQTT expire time to data received by Home Assistant
 
+# Battery level, see Battery level in the README
+# battery:
+#   internal_resistance: 35 # mΩ, 0 turns the load correction off
+#   average_readings: 6 # Readings averaged for the battery level, 1 turns it off
+#   curve: # [resting voltage, level %] pairs, left out uses a straight line
+#     # Example for a Samsung INR18650-35E, approximate, read off a 0.2A discharge chart
+#     - [2.80, 0]
+#     - [3.08, 5]
+#     - [3.25, 10]
+#     - [3.39, 15]
+#     - [3.44, 20]
+#     - [3.55, 30]
+#     - [3.63, 40]
+#     - [3.71, 50]
+#     - [3.80, 60]
+#     - [3.89, 70]
+#     - [3.99, 80]
+#     - [4.06, 90]
+#     - [4.08, 95]
+#     - [4.16, 100]
+
 # System Commands
 system:
   shutdown: sudo shutdown 0 -h
