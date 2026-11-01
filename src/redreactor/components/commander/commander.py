@@ -112,13 +112,16 @@ class Commander:
         # Remove the start of the topic to leave the command
         topic = str(message.topic).removeprefix(prefix)
 
-        # Convert the received command into readable JSON
+        # Convert the received command into readable JSON. Anyone with access
+        # to the broker can publish here, and an exception raised inside a paho
+        # callback stops the MQTT loop, so a bad payload must only be logged.
         try:
-            command = json.loads(str(message.payload.decode("utf-8")))
-        except json.JSONDecodeError:
+            command = json.loads(message.payload.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
             self.logger.warning(
-                "JSON Decode Error: %s",
-                str(message.payload.decode("utf-8")),
+                "Command received on %s is not valid JSON: %r",
+                topic,
+                message.payload,
             )
             return
 
