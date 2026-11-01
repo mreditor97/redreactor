@@ -214,3 +214,24 @@ def test_monitor_voltage_above_max_forces_external_power(monitor, mock_ina):
         monitor._monitor(ina=mock_ina)
 
     assert monitor.data.external_power is True
+
+
+def test_monitor_inverted_voltage_range_still_shuts_down(
+    monitor,
+    mock_ina,
+    dynamic_config,
+):
+    """A minimum voltage above the maximum must not disable low battery shutdown."""
+    dynamic_config.data["battery_voltage_minimum"] = 4.5
+    dynamic_config.data["battery_voltage_maximum"] = 4.2
+    mock_ina.voltage.return_value = DEFAULT_BATTERY_VOLTAGE_MINIMUM
+    mock_ina.current.return_value = 500.0  # Discharging, no external power
+
+    shutdown_called = []
+    monitor.event.on("shutdown", lambda: shutdown_called.append(True))
+
+    with patch.object(monitor, "_update"):
+        monitor._monitor(ina=mock_ina)
+
+    assert monitor.data.battery_level == 0
+    assert shutdown_called, "shutdown event was not emitted"
