@@ -4,17 +4,22 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 from importlib.metadata import version
 from typing import TYPE_CHECKING, Any
 
 from redreactor.components.mqtt import MQTT
-from redreactor.const import HOMEASSISTANT_ONLINE_STATE_DELAY
+from redreactor.const import (
+    HOMEASSISTANT_MIGRATION_DELAY,
+    HOMEASSISTANT_ONLINE_STATE_DELAY,
+)
 from redreactor.helpers.repeater import RepeatTimer
 
 from .binary_sensor import BinarySensor
 from .button import Button
 from .common import Availability, Base, Device, Encoder
+from .event import Event
 from .number import Number
 from .sensor import Sensor
 
@@ -24,12 +29,37 @@ if TYPE_CHECKING:
     from redreactor.configuration import DynamicConfiguration
 
 
+# (entity type, field name) of entities earlier versions published that have
+# since been removed, so they are deleted from Home Assistant
+REMOVED_ENTITIES = (
+    # Replaced by the under-voltage and throttled binary sensors
+    ("sensor", "cpu_stat_raw"),
+)
+
+
+# Base attributes that aren't part of an entity's discovery configuration
+COMPONENT_EXCLUDED_KEYS = frozenset({"configuration_topic", "device", "component_id"})
+
+
+def _slugify(text: str) -> str:
+    """Turn text into the lower case letters, digits and _ of an entity ID."""
+    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+
+
 class Homeassistant:
     """Home Assistant integration."""
 
     logger = logging.getLogger("Red Reactor")
 
-    configuration: list[Sensor | Number | BinarySensor | Button]
+    configuration: list[Sensor | Number | BinarySensor | Button | Event]
+
+    # Shared by every entity, sent once at the top of the device discovery
+    _device: Device
+    _availability: list[Availability]
+    _state_topic: str
+
+    # Set once the old per-entity discovery topics have been migrated
+    _migrated: bool = False
 
     _static_configuration: dict[str, Any] = {}
     _dynamic_configuration: DynamicConfiguration
@@ -45,6 +75,8 @@ class Homeassistant:
         self._static_configuration = static_configuration
         self._dynamic_configuration = dynamic_configuration
         self.configuration = []
+        self._migrated = False
+        self._migration_lock = threading.Lock()
 
         self._process_homeassistant_configuration(static_configuration)
 
@@ -70,6 +102,19 @@ class Homeassistant:
             hw_version="Rev 1.5",
             sw_version=version("redreactor"),
         )
+        self._device = configuration_defaults
+        mqtt_configuration = static_configuration["mqtt"]
+        topics = mqtt_configuration["topic"]
+        hostname = static_configuration["hostname"]["name"]
+        device_topic = f"{mqtt_configuration['base_topic']}/{hostname}"
+        self._state_topic = f"{device_topic}/{topics['state']}"
+        self._availability = [
+            Availability(
+                topic=f"{device_topic}/{topics['status']}",
+                payload_available=f"{static_configuration['status']['online']}",
+                payload_not_available=f"{static_configuration['status']['offline']}",
+            ),
+        ]
 
         for field_key in static_configuration["fields"]:
             field = static_configuration["fields"][field_key]
@@ -80,27 +125,23 @@ class Homeassistant:
                 expire_after=int(static_configuration["homeassistant"]["expire_after"]),
                 entity_category=field.get("entity_category", None),
                 icon=field.get("icon", None),
-                default_entity_id=self._default_entity_id(field),
+                default_entity_id=self._default_entity_id(
+                    field,
+                    str(configuration_defaults.name),
+                ),
                 unique_id=f"{configuration_defaults.identifiers}_{field['name']}",
-                state_topic=f"{static_configuration['mqtt']['base_topic']}/{static_configuration['hostname']['name']}/{static_configuration['mqtt']['topic']['state']}",
+                # The legacy per-entity discovery topic, only used to migrate
+                # Home Assistant to the device discovery that replaces it
                 configuration_topic=f"{static_configuration['homeassistant']['topic']}/{field['type']}/{configuration_defaults.identifiers}_{field['name']}/config",
-                availability=[
-                    Availability(
-                        topic=f"{static_configuration['mqtt']['base_topic']}/{static_configuration['hostname']['name']}/{static_configuration['mqtt']['topic']['status']}",
-                        payload_available=f"{static_configuration['status']['online']}",
-                        payload_not_available=f"{static_configuration['status']['offline']}",
-                    ),
-                ],
                 availability_mode=f"{field.get('availability_mode', 'all')}",
                 value_template=field.get(
                     "value_template",
                     f"{ '{{ value_json.' + str(field['name']) + ' }}' }",
                 ),
-                device=configuration_defaults,
                 enabled_by_default=field.get("enabled_by_default", True),
             )
 
-            configured: Sensor | BinarySensor | Number | Button = Sensor()
+            configured: Sensor | BinarySensor | Number | Button | Event = Sensor()
             if field["type"] == "sensor":
                 configured = Sensor(
                     unit_of_measurement=field.get("unit", None),
@@ -129,6 +170,16 @@ class Homeassistant:
                     unit_of_measurement=field.get("unit", None),
                 )
 
+            if field["type"] == "event":
+                configured = Event(
+                    event_types=list(field.get("event_types", [])),
+                )
+                # Events have their own topic and payload, the JSON event is
+                # read as it is, and they never expire
+                configuring.state_topic = f"{device_topic}/{topics['event']}"
+                configuring.value_template = field.get("value_template")
+                configuring.expire_after = None
+
             if field["type"] == "button":
                 configured = Button(
                     command_topic=f"{static_configuration['mqtt']['base_topic']}/{static_configuration['hostname']['name']}/{static_configuration['mqtt']['topic']['set']}/{field['name']}",
@@ -145,14 +196,25 @@ class Homeassistant:
             # such as unique_id, state_topic, and availability.
             configured.__dict__ |= configuring.__dict__
 
+            # Not part of the entity's own configuration, they place it in the
+            # device discovery message
+            configured.platform = str(field["type"])
+            configured.component_id = str(field["name"])
+
             self.configuration.append(configured)
 
-    def _default_entity_id(self, field: dict[str, Any]) -> str | None:
+    def _default_entity_id(self, field: dict[str, Any], device_name: str) -> str:
         """Return the entity ID Home Assistant should create the entity with.
 
         Home Assistant deprecated `object_id` in favour of `default_entity_id`,
         which takes a full entity ID including the domain. An `object_id` from
         older configuration files is converted so it keeps working.
+
+        Without either, the entity ID is the device name and the field name,
+        such as `sensor.red_reactor_pi_voltage`. Home Assistant would otherwise
+        make one up from the entity's name, which can include the device's
+        area. It only applies when the entity is first created, so existing
+        entity IDs, and any renamed in Home Assistant, are kept.
         """
         if field.get("default_entity_id"):
             return str(field["default_entity_id"])
@@ -167,25 +229,122 @@ class Homeassistant:
             )
             return f"{field['type']}.{field['object_id']}"
 
-        return None
+        return f"{field['type']}.{_slugify(device_name)}_{_slugify(field['name'])}"
+
+    @property
+    def _device_discovery_topic(self) -> str:
+        """Topic for the single device discovery message holding every entity."""
+        homeassistant_topic = self._static_configuration["homeassistant"]["topic"]
+        return f"{homeassistant_topic}/device/{self._device.identifiers}/config"
+
+    def _device_discovery_payload(self) -> dict[str, Any]:
+        """Build the device discovery payload.
+
+        The device, origin, availability and state topic are shared, so they
+        are sent once instead of in every entity. An entity's own value, such
+        as the event entity's state topic, takes precedence. None values are
+        left out, Home Assistant rejects discovery payloads with null fields.
+        """
+        components: dict[str, Any] = {}
+        for field in self.configuration:
+            component = {
+                k: v
+                for (k, v) in field.__dict__.items()
+                if v is not None and k not in COMPONENT_EXCLUDED_KEYS
+            }
+            if component.get("state_topic") == self._state_topic:
+                del component["state_topic"]
+            components[str(field.component_id)] = component
+
+        return {
+            "device": self._device,
+            "origin": {
+                "name": "redreactor",
+                "sw_version": version("redreactor"),
+                "support_url": "https://github.com/mreditor97/redreactor",
+            },
+            "availability": self._availability,
+            "state_topic": self._state_topic,
+            "components": components,
+        }
 
     def _update_homeassistant_configuration(self) -> None:
-        """Push Home Assistant configuration for auto discovery."""
+        """Push Home Assistant configuration for auto discovery.
+
+        The first time, the entities are first moved over from the older one
+        message per entity discovery (see `_migrate_discovery`).
+        """
+        with self._migration_lock:
+            migrate = not self._migrated
+            self._migrated = True
+
+        if migrate:
+            self._migrate_discovery()
+            return
+
+        self._publish_device_discovery()
+
+    def _publish_device_discovery(self) -> None:
+        """Publish the device discovery message."""
         self.logger.debug(
             "Publishing Homeassistant MQTT configuration / discovery information",
         )
 
-        for field in self.configuration:
-            # None values are stripped before serialisation — Home Assistant
-            # rejects discovery payloads that contain null fields.
+        MQTT.event.emit(
+            event_name="publish",
+            topic=self._device_discovery_topic,
+            payload=json.dumps(self._device_discovery_payload(), cls=Encoder),
+        )
+
+    def _migrate_discovery(self) -> None:
+        """Move Home Assistant from per-entity discovery to device discovery.
+
+        Earlier versions published one discovery message per entity. Following
+        Home Assistant's migration steps, each old topic is first sent
+        `{"migrate_discovery": true}`, which unloads the entity but keeps its
+        entity ID, name and history. The device discovery then picks the
+        entities up again by their unique IDs, and the old topics are cleared
+        with an empty retained message. Removed entities, such as the raw CPU
+        stat sensor, are sent an empty message, which deletes them.
+
+        Sent on every start, as Home Assistant may still have the old entities
+        loaded. Where it doesn't, Home Assistant ignores these messages.
+        """
+        legacy_topics = [str(field.configuration_topic) for field in self.configuration]
+
+        for topic in self._removed_entity_topics():
+            MQTT.event.emit(event_name="publish", topic=topic, payload="")
+
+        for topic in legacy_topics:
             MQTT.event.emit(
                 event_name="publish",
-                topic=field.configuration_topic,
-                payload=json.dumps(
-                    {k: v for (k, v) in field.__dict__.items() if v is not None},
-                    cls=Encoder,
-                ),
+                topic=topic,
+                payload=json.dumps({"migrate_discovery": True}),
             )
+
+        def finish() -> None:
+            self._publish_device_discovery()
+            for topic in legacy_topics:
+                MQTT.event.emit(
+                    event_name="publish",
+                    topic=topic,
+                    payload="",
+                    retain=True,
+                )
+
+        # Give Home Assistant time to unload the old entities first, run off
+        # the MQTT network thread so it isn't blocked while waiting
+        timer = threading.Timer(HOMEASSISTANT_MIGRATION_DELAY, finish)
+        timer.daemon = True
+        timer.start()
+
+    def _removed_entity_topics(self) -> list[str]:
+        """Old discovery topics of entities that are no longer published."""
+        homeassistant_topic = self._static_configuration["homeassistant"]["topic"]
+        return [
+            f"{homeassistant_topic}/{entity_type}/{self._device.identifiers}_{name}/config"
+            for entity_type, name in REMOVED_ENTITIES
+        ]
 
     @property
     def _status_topic(self) -> str:

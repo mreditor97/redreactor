@@ -27,6 +27,7 @@ def static_config():
                 "state": "state",
                 "status": "status",
                 "set": "set",
+                "event": "event",
             },
             "exit_on_fail": True,
         },
@@ -98,13 +99,19 @@ def static_config():
                 "entity_category": "diagnostic",
                 "suggested_display_precision": 2,
             },
-            "cpu_stat_raw": {
-                "name": "cpu_stat_raw",
-                "pretty": "CPU stat raw",
-                "type": "sensor",
+            "under_voltage": {
+                "name": "under_voltage",
+                "pretty": "Under-voltage",
+                "type": "binary_sensor",
+                "device_class": "problem",
                 "entity_category": "diagnostic",
-                "enabled_by_default": False,
-                "state_class": None,
+            },
+            "throttled": {
+                "name": "throttled",
+                "pretty": "Throttled",
+                "type": "binary_sensor",
+                "device_class": "problem",
+                "entity_category": "diagnostic",
             },
             "cpu_stat_text": {
                 "name": "cpu_stat",
@@ -178,6 +185,17 @@ def static_config():
                 "unit": "d",
                 "device_class": "duration",
                 "suggested_display_precision": 1,
+            },
+            "power_event": {
+                "name": "power_event",
+                "pretty": "Power event",
+                "type": "event",
+                "event_types": [
+                    "power_lost",
+                    "power_restored",
+                    "low_battery",
+                    "shutdown_started",
+                ],
             },
             "restart": {
                 "name": "restart",

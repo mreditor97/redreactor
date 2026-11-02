@@ -411,3 +411,61 @@ def test_on_message_sets_battery_capacity(commander, static_config):
     _send_number(cmd, static_config, "battery_capacity", "3000")
 
     assert cmd._dynamic_configuration.data["battery_capacity"] == 3000
+
+
+def test_on_command_shutdown_publishes_shutdown_started_first(commander):
+    """A shutdown sends the shutdown started event before going offline."""
+    cmd, mock_monitor = commander
+    from redreactor.components.mqtt import MQTT
+
+    order: list[str] = []
+    mock_monitor.publish_event.side_effect = order.append
+    MQTT.event.on("publish", lambda payload, **_: order.append(payload))
+
+    target = "redreactor.components.commander.commander.subprocess.run"
+    with patch(target), patch("time.sleep"):
+        cmd._on_command("shutdown")
+
+    assert order[:2] == ["shutdown_started", "offline"]
+
+
+def test_on_command_restart_sends_no_shutdown_event(commander):
+    """A restart isn't a shutdown, so no shutdown started event is sent."""
+    cmd, mock_monitor = commander
+
+    target = "redreactor.components.commander.commander.subprocess.run"
+    with patch(target), patch("time.sleep"):
+        cmd._on_command("restart")
+
+    mock_monitor.publish_event.assert_not_called()
+
+
+def test_second_shutdown_is_ignored(commander):
+    """A shutdown already running isn't started again."""
+    cmd, mock_monitor = commander
+
+    target = "redreactor.components.commander.commander.subprocess.run"
+    with patch(target) as mock_run, patch("time.sleep"):
+        cmd._on_command("shutdown")
+        cmd._on_command("shutdown")
+        cmd._on_command("restart")
+
+    mock_run.assert_called_once()
+    mock_monitor.publish_event.assert_called_once_with("shutdown_started")
+
+
+@pytest.mark.parametrize("event_type", ["shutdown", "restart"])
+def test_on_command_stops_the_monitor_before_going_offline(commander, event_type):
+    """The monitor stops first, so it can't publish online after offline."""
+    cmd, mock_monitor = commander
+    from redreactor.components.mqtt import MQTT
+
+    order: list[str] = []
+    mock_monitor.stop.side_effect = lambda: order.append("stop")
+    MQTT.event.on("publish", lambda payload, **_: order.append(payload))
+
+    target = "redreactor.components.commander.commander.subprocess.run"
+    with patch(target), patch("time.sleep"):
+        cmd._on_command(event_type)
+
+    assert order.index("stop") < order.index("offline")

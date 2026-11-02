@@ -5,7 +5,7 @@
 mqtt:
   broker: 127.0.0.1 # MQTT Broker Address
   port: 1883 # MQTT Port
-  user: testing # MQTT Broker username
+  user: testing # MQTT Broker username, leave out to connect anonymously
   password: testing # MQTT Broker password
   version: 5 # MQTT Version 5 or 3
 

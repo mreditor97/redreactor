@@ -1,7 +1,6 @@
 """Constants used by Red Reactor components."""
 
 DEFAULT_REPORT_INTERVAL = 30  # Seconds between data reporting
-DEFAULT_EXPIRE_INTERVAL = 120  # Seconds before Home Assistant invalidates received data
 DEFAULT_BATTERY_WARNING_THRESHOLD = 10  # Percentage of charge to shut down at
 DEFAULT_BATTERY_VOLTAGE_MINIMUM = 2.9  # Minimum battery voltage before shutting down
 DEFAULT_BATTERY_VOLTAGE_MAXIMUM = 4.2  # Maximum battery voltage (fully charged)
@@ -41,5 +40,19 @@ DEFAULT_LOG_BACKUP_COUNT = 3
 # Seconds to wait after Home Assistant comes online before resending the latest
 # readings, so the entities exist when the state message arrives
 HOMEASSISTANT_ONLINE_STATE_DELAY = 2.0
+# Event types published on the power event topic, for Home Assistant automations
+POWER_EVENT_POWER_LOST = "power_lost"
+POWER_EVENT_POWER_RESTORED = "power_restored"
+POWER_EVENT_LOW_BATTERY = "low_battery"
+POWER_EVENT_SHUTDOWN_STARTED = "shutdown_started"
+POWER_EVENT_TYPES = (
+    POWER_EVENT_POWER_LOST,
+    POWER_EVENT_POWER_RESTORED,
+    POWER_EVENT_LOW_BATTERY,
+    POWER_EVENT_SHUTDOWN_STARTED,
+)
+# Seconds to wait after asking Home Assistant to migrate the old per-entity
+# discovery topics, before publishing the device discovery that replaces them
+HOMEASSISTANT_MIGRATION_DELAY = 1.0
 # Hours in a day, the battery time remaining is published in days
 HOURS_PER_DAY = 24

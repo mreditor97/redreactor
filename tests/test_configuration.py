@@ -284,8 +284,7 @@ def test_linked_config_converts_quoted_values(tmp_path):
     """Quoted numbers and booleans that earlier versions accepted still work."""
     static_file = tmp_path / "config.yaml"
     static_file.write_text(
-        "mqtt: {port: '1884', exit_on_fail: 'False'}\n"
-        "ina: {shunt_ohms: '0.1'}\n",
+        "mqtt: {port: '1884', exit_on_fail: 'False'}\nina: {shunt_ohms: '0.1'}\n",
     )
 
     config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
@@ -308,7 +307,13 @@ def test_linked_config_new_defaults(tmp_path):
     assert config.static["fields"]["charging"]["type"] == "binary_sensor"
     assert config.static["fields"]["battery_capacity"]["unit"] == "mAh"
     assert config.static["fields"]["battery_time_remaining"]["type"] == "sensor"
-    assert config.static["fields"]["cpu_stat_raw"]["state_class"] is None
+    assert "cpu_stat_raw" not in config.static["fields"]
+    assert config.static["fields"]["under_voltage"]["entity_category"] == "diagnostic"
+    assert config.static["fields"]["throttled"]["device_class"] == "problem"
+    assert config.static["fields"]["power_event"]["type"] == "event"
+    assert config.static["mqtt"]["topic"]["event"] == "event"
+    assert config.static["mqtt"]["user"] == ""
+    assert config.static["mqtt"]["password"] == ""
     assert (
         config.static["fields"]["battery_warning_threshold"]["pretty"]
         == "Battery shutdown level"

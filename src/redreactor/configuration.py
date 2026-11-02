@@ -31,6 +31,7 @@ from redreactor.const import (
     DEFAULT_INA_MONITOR_INTERVAL,
     DEFAULT_INA_SHUNT_OHMS,
     DEFAULT_REPORT_INTERVAL,
+    POWER_EVENT_TYPES,
 )
 from redreactor.helpers.emitter import EventEmitter
 from redreactor.helpers.utils import dict_merge
@@ -447,8 +448,9 @@ class LinkedConfiguration:
             "mqtt": {
                 "broker": "127.0.0.1",
                 "port": 1883,
-                "user": "test",
-                "password": "test",
+                # Empty connects anonymously, set both for a broker with logins
+                "user": "",
+                "password": "",
                 "base_topic": "redreactor",
                 "version": 3,
                 "transport": "tcp",
@@ -464,6 +466,7 @@ class LinkedConfiguration:
                     "state": "state",
                     "status": "status",
                     "set": "set",
+                    "event": "event",
                 },
                 "exit_on_fail": True,
             },
@@ -535,14 +538,19 @@ class LinkedConfiguration:
                     "entity_category": "diagnostic",
                     "suggested_display_precision": 2,
                 },
-                "cpu_stat_raw": {
-                    "name": "cpu_stat_raw",
-                    "pretty": "CPU stat raw",
-                    "type": "sensor",
+                "under_voltage": {
+                    "name": "under_voltage",
+                    "pretty": "Under-voltage",
+                    "type": "binary_sensor",
+                    "device_class": "problem",
                     "entity_category": "diagnostic",
-                    "enabled_by_default": False,
-                    # A bitmask, so long-term statistics would be meaningless
-                    "state_class": None,
+                },
+                "throttled": {
+                    "name": "throttled",
+                    "pretty": "Throttled",
+                    "type": "binary_sensor",
+                    "device_class": "problem",
+                    "entity_category": "diagnostic",
                 },
                 "cpu_stat_text": {
                     "name": "cpu_stat",
@@ -616,6 +624,12 @@ class LinkedConfiguration:
                     "unit": "d",
                     "device_class": "duration",
                     "suggested_display_precision": 1,
+                },
+                "power_event": {
+                    "name": "power_event",
+                    "pretty": "Power event",
+                    "type": "event",
+                    "event_types": list(POWER_EVENT_TYPES),
                 },
                 "restart": {
                     "name": "restart",
