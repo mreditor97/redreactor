@@ -39,6 +39,9 @@ class MQTT:
     # Exit on fail (stops if it cannot connect to the MQTT Broker)
     _exit_on_fail: bool = False
 
+    # Failed (re)connection attempts since the last connection
+    _connect_failures: int = 0
+
     def __init__(
         self,
         static_configuration: Any,
@@ -100,6 +103,7 @@ class MQTT:
             sys.exit(1)
 
         self._client.on_connect = self._mqtt_on_connect
+        self._client.on_connect_fail = self._mqtt_on_connect_fail
         self._client.on_disconnect = self._mqtt_on_disconnect
         self._client.on_message = self._mqtt_on_message
 
@@ -139,10 +143,10 @@ class MQTT:
                 certfile=tls_configuration.get("certfile") or None,
                 keyfile=tls_configuration.get("keyfile") or None,
             )
-        except (OSError, ValueError):
+        except (OSError, ValueError) as error:
             # Without the requested TLS setup, connecting would either fail or
             # silently fall back to an unencrypted connection, so always exit
-            self.logger.exception("MQTT TLS configuration error")
+            self.logger.error("MQTT TLS configuration error: %s", error)  # noqa: TRY400
             sys.exit(1)
 
         if tls_configuration.get("insecure"):
@@ -175,10 +179,19 @@ class MQTT:
 
         try:
             self._client.connect(host=broker, port=port, keepalive=timeout)
-        except OSError:
+        except OSError as error:
             # OSError covers refused connections, timeouts, DNS failures and an
-            # unreachable network (common while a Pi is still booting).
-            self.logger.exception("Unable to connect to the MQTT Broker")
+            # unreachable network (common while a Pi is still booting). The
+            # reason is enough to fix it, a traceback would only bury it.
+            self.logger.error(  # noqa: TRY400
+                "Unable to connect to the MQTT Broker %s:%i (%s)%s",
+                broker,
+                port,
+                error,
+                "" if self._exit_on_fail else ", retrying",
+            )
+            # Already logged, so the retries don't log it again
+            self._connect_failures = 1
 
             if self._exit_on_fail:
                 # Non-zero so a supervisor (systemd Restart=on-failure) retries
@@ -200,6 +213,7 @@ class MQTT:
         """MQTT Connect event (paho callback API version 2)."""
         if not reason_code.is_failure:
             self.logger.info("Connected to MQTT Broker")
+            self._connect_failures = 0
 
             # Replace any retained Last Will `offline` straight away, rather
             # than waiting for the first report
@@ -225,6 +239,19 @@ class MQTT:
             self.logger.error(
                 "MQTT Broker connection refused, reason: %s",
                 reason_code,
+            )
+
+    def _mqtt_on_connect_fail(self, _client: Client, _userdata: Any) -> None:
+        """MQTT connection attempt failed, paho retries it with a backoff.
+
+        paho only logs these at debug level, so without this a broker that is
+        down or unreachable would leave nothing in the log. Logged once per
+        outage rather than on every attempt.
+        """
+        self._connect_failures += 1
+        if self._connect_failures == 1:
+            self.logger.warning(
+                "Unable to reach the MQTT Broker, retrying until it is back",
             )
 
     def _mqtt_on_disconnect(

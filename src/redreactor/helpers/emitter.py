@@ -3,7 +3,10 @@
 Custom event emitter.
 """
 
+import logging
 from typing import Any
+
+logger = logging.getLogger("Red Reactor")
 
 
 class EventEmitter:
@@ -28,9 +31,22 @@ class EventEmitter:
         *args: Any,
         **kwargs: Any,
     ) -> None:
-        """Event trigger."""
+        """Event trigger.
+
+        A listener that raises is logged and the remaining listeners still run.
+        Events are mostly emitted from inside paho callbacks, where an exception
+        would end loop_forever() and stop the whole service. SystemExit and
+        KeyboardInterrupt are not caught, so a deliberate exit still works.
+        """
         for function in self.__callbacks.get(event_name, []):
-            function(*args, **kwargs)
+            try:
+                function(*args, **kwargs)
+            except Exception:
+                logger.exception(
+                    "Error in the %s listener %s",
+                    event_name,
+                    getattr(function, "__qualname__", function),
+                )
 
     def off(self, event_name: str, function: Any) -> None:
         """Event stop."""

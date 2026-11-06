@@ -51,3 +51,31 @@ def test_emit_passes_args_and_kwargs():
     emitter.on("data", cb)
     emitter.emit("data", 1, 2, key="value")
     cb.assert_called_once_with(1, 2, key="value")
+
+
+def test_failing_listener_does_not_stop_the_others(caplog):
+    """A listener that raises is logged, and the later listeners still run.
+
+    Most events are emitted from paho callbacks, where an exception would end
+    the MQTT loop and stop the service.
+    """
+    emitter = EventEmitter()
+    later = MagicMock()
+    emitter.on("test", MagicMock(side_effect=RuntimeError("boom")))
+    emitter.on("test", later)
+
+    emitter.emit("test", 1, key="value")
+
+    later.assert_called_once_with(1, key="value")
+    assert "Error in the test listener" in caplog.text
+
+
+def test_system_exit_from_a_listener_is_not_caught():
+    """A deliberate exit inside a listener still exits."""
+    import pytest
+
+    emitter = EventEmitter()
+    emitter.on("test", MagicMock(side_effect=SystemExit(1)))
+
+    with pytest.raises(SystemExit):
+        emitter.emit("test")

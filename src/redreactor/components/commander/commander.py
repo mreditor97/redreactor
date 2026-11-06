@@ -17,8 +17,10 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from redreactor.components.mqtt import MQTT
 from redreactor.const import (
+    COMMAND_PAYLOAD_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
     POWER_EVENT_SHUTDOWN_STARTED,
+    SYSTEM_COMMAND_TIMEOUT,
 )
 from redreactor.helpers.emitter import EventEmitter
 
@@ -121,9 +123,19 @@ class Commander:
         # Convert the received command into readable JSON. Anyone with access
         # to the broker can publish here, and an exception raised inside a paho
         # callback stops the MQTT loop, so a bad payload must only be logged.
+        # A setting is a single number, so a large payload is never a valid
+        # command. Refusing it first also stops a deeply nested JSON payload
+        # from raising RecursionError while it is decoded.
+        if len(message.payload) > COMMAND_PAYLOAD_MAXIMUM:
+            self.logger.warning(
+                "Command received on %s is too large (%i bytes), ignoring it",
+                topic,
+                len(message.payload),
+            )
+            return
         try:
             command = json.loads(message.payload.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
             self.logger.warning(
                 "Command received on %s is not valid JSON: %r",
                 topic,
@@ -288,11 +300,30 @@ class Commander:
 
         # The shutdown/restart command comes from the trusted YAML config, not
         # from the MQTT payload, so splitting with shlex (shell=False) is safe.
-        cmd = shlex.split(self._static_configuration["system"][event_type])
+        # The commands are checked when the configuration is loaded, but this
+        # must still reach the disconnect below if one can't be run, otherwise
+        # the service is left running with the readings already stopped.
+        command = self._static_configuration["system"][event_type]
         try:
-            result = subprocess.run(cmd, check=False)  # noqa: S603
-        except OSError:
-            self.logger.exception("Unable to run the %s command %s", event_type, cmd)
+            cmd = shlex.split(command)
+            result = subprocess.run(  # noqa: S603
+                cmd,
+                check=False,
+                timeout=SYSTEM_COMMAND_TIMEOUT,
+            )
+        except (OSError, ValueError):
+            self.logger.exception(
+                "Unable to run the %s command %r",
+                event_type,
+                command,
+            )
+        except subprocess.TimeoutExpired:
+            self.logger.error(  # noqa: TRY400
+                "The %s command %r did not finish within %i seconds",
+                event_type,
+                command,
+                SYSTEM_COMMAND_TIMEOUT,
+            )
         else:
             if result.returncode != 0:
                 self.logger.error(

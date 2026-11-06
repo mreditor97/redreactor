@@ -393,3 +393,76 @@ def test_migration_runs_only_once(homeassistant):
     published = _published(homeassistant, migrated=True)
 
     assert [topic for topic, _, _ in published] == [DEVICE_TOPIC]
+
+
+def test_online_flood_queues_one_republish(homeassistant):
+    """Repeated online messages start one timer, not one each.
+
+    3000 online messages used to start 3000 timer threads at once.
+    """
+    timer_class = "redreactor.components.homeassistant.homeassistant.threading.Timer"
+    with (
+        patch.object(homeassistant, "_update_homeassistant_configuration") as update,
+        patch(timer_class) as timer,
+    ):
+        timer.return_value.is_alive.return_value = True
+        for _ in range(50):
+            homeassistant._mqtt_on_message(
+                None,
+                None,
+                _message("homeassistant/status", b"online"),
+            )
+
+    timer.assert_called_once()
+    update.assert_called_once()
+
+
+def test_online_after_the_queued_republish_runs_again(homeassistant):
+    """Once the queued republish has run, the next online message is handled."""
+    timer_class = "redreactor.components.homeassistant.homeassistant.threading.Timer"
+    with (
+        patch.object(homeassistant, "_update_homeassistant_configuration") as update,
+        patch(timer_class) as timer,
+    ):
+        timer.return_value.is_alive.return_value = False
+        for _ in range(2):
+            homeassistant._mqtt_on_message(
+                None,
+                None,
+                _message("homeassistant/status", b"online"),
+            )
+
+    assert timer.call_count == 2
+    assert update.call_count == 2
+
+
+@pytest.mark.parametrize(
+    ("hostname", "device_id"),
+    [
+        ("pi", "redreactor_pi"),
+        ("my pi", "redreactor_my_pi"),
+        ("pi.local", "redreactor_pi_local"),
+        ("pi-2_b", "redreactor_pi-2_b"),
+    ],
+)
+def test_discovery_topic_is_valid_for_any_hostname(
+    static_config,
+    dynamic_config,
+    hostname,
+    device_id,
+):
+    """Home Assistant ignores discovery topics with other characters.
+
+    A hostname of `pi.local` or `my pi` used to give no entities at all.
+    """
+    from redreactor.components.homeassistant import Homeassistant
+
+    static_config["hostname"]["name"] = hostname
+    homeassistant = Homeassistant(static_config, dynamic_config)
+
+    assert (
+        homeassistant._device_discovery_topic
+        == f"homeassistant/device/{device_id}/config"
+    )
+    for topic in homeassistant._removed_entity_topics():
+        assert topic.split("/")[2].startswith(device_id)

@@ -257,6 +257,39 @@ def test_linked_config_accepts_example_config(tmp_path):
         ("ina: {monitor_interval: 0}\n", "`ina.monitor_interval`"),
         ("ina: {shunt_ohms: .nan}\n", "`ina.shunt_ohms`"),
         ("system: {shutdown: ''}\n", "`system.shutdown`"),
+        # Found by starting the service with hostile configurations
+        ('system: {shutdown: "echo \'oops"}\n', "`system.shutdown`"),
+        ("system: {restart: '   '}\n", "`system.restart`"),
+        ("fields: {voltage: null}\n", "`fields.voltage`"),
+        ("fields: {voltage: text}\n", "`fields.voltage`"),
+        ("fields: {extra: {name: extra}}\n", "`fields.extra.type`"),
+        ("fields: {voltage: {type: bogus}}\n", "`fields.voltage.type`"),
+        ("fields: {voltage: {name: 'a/b'}}\n", "`fields.voltage.name`"),
+        ("fields: {voltage: {name: 'a.b'}}\n", "`fields.voltage.name`"),
+        ("fields: {voltage: {name: '1volt'}}\n", "`fields.voltage.name`"),
+        ("fields: {report_interval: {min: 'five'}}\n", "`fields.report_interval.min`"),
+        ("status: {online: 1}\n", "`status.online`"),
+        ("status: {offline: ''}\n", "`status.offline`"),
+        ("status: {online: up, offline: up}\n", "`status.offline`"),
+        ("hostname: {pretty: null}\n", "`hostname.pretty`"),
+        ("mqtt: {broker: null}\n", "`mqtt.broker`"),
+        ("mqtt: {broker: 12}\n", "`mqtt.broker`"),
+        ("mqtt: {broker: '  '}\n", "`mqtt.broker`"),
+        ("mqtt: {client_id: 5}\n", "`mqtt.client_id`"),
+        ("mqtt: {user: 1234}\n", "`mqtt.user`"),
+        ("mqtt: {password: 5678}\n", "`mqtt.password`"),
+        ("mqtt: {transport: bogus}\n", "`mqtt.transport`"),
+        ("mqtt: {timeout: 70000}\n", "`mqtt.timeout`"),
+        ("ina: {monitor_interval: 0.001}\n", "`ina.monitor_interval`"),
+        ("ina: {monitor_interval: 1.0e+300}\n", "`ina.monitor_interval`"),
+        (
+            "homeassistant: {discovery_interval: 0.001}\n",
+            "`homeassistant.discovery_interval`",
+        ),
+        (
+            "homeassistant: {discovery_interval: .inf}\n",
+            "`homeassistant.discovery_interval`",
+        ),
     ],
 )
 def test_linked_config_rejects_invalid_values(tmp_path, override, path):
@@ -417,3 +450,80 @@ def test_linked_config_converts_quoted_internal_resistance(tmp_path):
     config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
 
     assert config.static["battery"]["internal_resistance"] == 85
+
+
+def test_linked_config_missing_static_file(tmp_path):
+    """A missing configuration file is a clear error, not a traceback."""
+    with pytest.raises(ConfigurationError, match="Unable to read"):
+        LinkedConfiguration(
+            str(tmp_path / "missing.yaml"),
+            str(tmp_path / "dynamic.json"),
+        )
+
+
+def test_linked_config_invalid_yaml(tmp_path):
+    """Broken YAML is a clear error that says where the problem is."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text("mqtt: [unclosed\n  : :")
+
+    with pytest.raises(ConfigurationError, match="not valid YAML"):
+        LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+
+
+@pytest.mark.parametrize(
+    ("stored", "key", "default"),
+    [
+        (
+            {"battery_warning_threshold": 1000},
+            "battery_warning_threshold",
+            DEFAULT_BATTERY_WARNING_THRESHOLD,
+        ),
+        (
+            {"battery_warning_threshold": -5},
+            "battery_warning_threshold",
+            DEFAULT_BATTERY_WARNING_THRESHOLD,
+        ),
+        ({"report_interval": 1e300}, "report_interval", DEFAULT_REPORT_INTERVAL),
+        ({"report_interval": 1}, "report_interval", DEFAULT_REPORT_INTERVAL),
+    ],
+)
+def test_linked_config_resets_stored_values_outside_the_field_range(
+    tmp_path,
+    stored,
+    key,
+    default,
+):
+    """Stored settings are held to the same range as values sent over MQTT.
+
+    A threshold of 1000% would shut the device down on every start, and a
+    huge report interval overflowed the timer.
+    """
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text("")
+    dynamic_file = tmp_path / "dynamic.json"
+    dynamic_file.write_text(json.dumps(stored))
+
+    config = LinkedConfiguration(str(static_file), str(dynamic_file))
+
+    assert config.dynamic.data[key] == default
+
+
+def test_dynamic_config_missing_folder_uses_defaults(tmp_path):
+    """A database path that can't be created doesn't stop the service."""
+    config = DynamicConfiguration(str(tmp_path / "missing" / "dynamic.json"))
+
+    assert config.data["report_interval"] == DEFAULT_REPORT_INTERVAL
+
+
+def test_dynamic_config_write_failure_is_logged(tmp_path, caplog):
+    """A failed save is logged rather than raised into the MQTT loop."""
+    dynamic_file = tmp_path / "dynamic.json"
+    config = DynamicConfiguration(str(dynamic_file))
+    # Opening the temporary file for writing now fails
+    (tmp_path / "dynamic.json.tmp").mkdir()
+    config.data["report_interval"] = 45
+
+    config.write()
+
+    assert "Unable to save the settings" in caplog.text
+    assert config.data["report_interval"] == 45
