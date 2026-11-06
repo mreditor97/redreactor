@@ -142,7 +142,17 @@ Command topic | value:
 - `battery.internal_resistance` is the battery's internal resistance in mΩ (default `35`, `0` turns it off), see [Battery level](#battery-level)
 - `battery.average_readings` is how many monitor readings are averaged for `battery_level` (default `6`, 30 seconds at the default `ina.monitor_interval`, `1` turns it off), see [Battery level](#battery-level)
 - `battery.curve` maps the battery's resting voltage to its level, see [Battery level](#battery-level)
+- `fields.<field>.name` is used in the MQTT topics and the state JSON, so it must be letters, digits and `_`, not starting with a digit
 - `fields.<field>.default_entity_id` sets the entity ID Home Assistant creates the entity with, for example `sensor.ups_voltage`. The older `object_id` option still works but is deprecated by Home Assistant
+
+The configuration is checked at start-up. Any invalid value stops the service with one line naming each problem, for example `` `ina.monitor_interval` must be a number of seconds from 0.1 to 86400 ``. The limits checked include:
+
+- `ina.monitor_interval` from 0.1 to 86400 seconds, and `homeassistant.discovery_interval` from 1 to 86400 seconds
+- `mqtt.timeout` (the keepalive) from 0 to 65535 seconds, and `mqtt.transport` one of `tcp`, `websockets` or `unix`
+- `system.shutdown` and `system.restart` must be commands that can be split into arguments, so an unclosed quote is found at start-up rather than when the battery is low
+- `status.online` and `status.offline` must be different, non-empty text
+
+A shutdown or restart command that hasn't finished after 60 seconds is given up on, and the service exits. Settings stored in the database file are held to the same `min` and `max` as values sent over MQTT. If the database or log file can't be written, the service keeps running with a warning, as the battery monitoring matters more.
 
 ### Battery level
 

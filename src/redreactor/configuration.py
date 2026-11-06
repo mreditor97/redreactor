@@ -10,6 +10,8 @@ import json
 import logging
 import math
 import os
+import re
+import shlex
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -42,6 +44,19 @@ logger = logging.getLogger("Red Reactor")
 I2C_ADDRESS_MINIMUM = 0x03
 I2C_ADDRESS_MAXIMUM = 0x77
 PORT_MAXIMUM = 65535
+# MQTT sends the keepalive as a 16 bit number of seconds
+KEEPALIVE_MAXIMUM = 65535
+# Monitor and discovery intervals, in seconds. A tiny interval spins a timer
+# thread, and a huge one overflows the timer
+MONITOR_INTERVAL_MINIMUM = 0.1
+DISCOVERY_INTERVAL_MINIMUM = 1
+INTERVAL_MAXIMUM = 86400
+
+FIELD_TYPES = frozenset({"sensor", "binary_sensor", "number", "button", "event"})
+MQTT_TRANSPORTS = frozenset({"tcp", "websockets", "unix"})
+# Field names are used as MQTT topic levels, JSON keys and in the Home
+# Assistant template `{{ value_json.<name> }}`, so they must be identifiers
+FIELD_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 class ConfigurationError(ValueError):
@@ -95,7 +110,7 @@ def _convert_quoted_values(configuration: dict[str, Any]) -> None:
                 tls[key] = value.lower() == "true"
 
 
-def _validate_static(configuration: dict[str, Any]) -> list[str]:
+def _validate_static(configuration: dict[str, Any]) -> list[str]:  # noqa: C901
     """Check the types and ranges of the merged static configuration.
 
     Returns a list of problems, empty when the configuration is valid. Values
@@ -136,6 +151,11 @@ def _validate_static(configuration: dict[str, Any]) -> list[str]:
                 value = value[part]
             errors.append(f"`{path}` {requirement}, got {value[key]!r}")
 
+    errors.extend(_validate_fields(configuration["fields"]))
+    if errors:
+        # The remaining checks and the defaults below read each field
+        return errors
+
     _convert_quoted_values(configuration)
 
     mqtt = configuration["mqtt"]
@@ -165,9 +185,27 @@ def _validate_static(configuration: dict[str, Any]) -> list[str]:
     check("mqtt.version", mqtt["version"] in {3, 5}, "must be 3 or 5")
     check(
         "mqtt.timeout",
-        _is_number(mqtt["timeout"]) and mqtt["timeout"] >= 0,
-        "must be a number of seconds, 0 or more",
+        _is_number(mqtt["timeout"]) and 0 <= mqtt["timeout"] <= KEEPALIVE_MAXIMUM,
+        f"must be a number of seconds from 0 to {KEEPALIVE_MAXIMUM}",
     )
+    check(
+        "mqtt.transport",
+        mqtt["transport"] in MQTT_TRANSPORTS,
+        f"must be one of {', '.join(sorted(MQTT_TRANSPORTS))}",
+    )
+    check(
+        "mqtt.broker",
+        isinstance(mqtt["broker"], str) and mqtt["broker"].strip() != "",
+        "must be a host name or address",
+    )
+    # Text or left out, paho calls len() and encode() on these
+    for key in ("user", "password", "client_id"):
+        if key in mqtt:
+            check(
+                f"mqtt.{key}",
+                mqtt[key] is None or isinstance(mqtt[key], str),
+                "must be text",
+            )
     check(
         "ina.address",
         not isinstance(ina["address"], bool)
@@ -188,10 +226,22 @@ def _validate_static(configuration: dict[str, Any]) -> list[str]:
     errors.extend(_validate_tls(mqtt["tls"]))
     errors.extend(_validate_battery_curve(configuration["battery"]["curve"]))
 
-    # Positive numbers, a zero interval would spin a timer thread
+    for path, value, minimum in (
+        (
+            "homeassistant.discovery_interval",
+            homeassistant["discovery_interval"],
+            DISCOVERY_INTERVAL_MINIMUM,
+        ),
+        ("ina.monitor_interval", ina["monitor_interval"], MONITOR_INTERVAL_MINIMUM),
+    ):
+        check(
+            path,
+            _is_number(value) and minimum <= value <= INTERVAL_MAXIMUM,
+            f"must be a number of seconds from {minimum} to {INTERVAL_MAXIMUM}",
+        )
+
+    # Positive numbers
     for path, value in (
-        ("homeassistant.discovery_interval", homeassistant["discovery_interval"]),
-        ("ina.monitor_interval", ina["monitor_interval"]),
         ("ina.shunt_ohms", ina["shunt_ohms"]),
         ("ina.max_expected_amps", ina["max_expected_amps"]),
     ):
@@ -238,19 +288,69 @@ def _validate_static(configuration: dict[str, Any]) -> list[str]:
             f"must be text without {' or '.join(forbidden)}",
         )
 
+    # Payloads compared with, or published as, MQTT text
+    for path, value in (
+        ("homeassistant.status_online", homeassistant["status_online"]),
+        ("status.online", configuration["status"]["online"]),
+        ("status.offline", configuration["status"]["offline"]),
+        ("hostname.pretty", configuration["hostname"]["pretty"]),
+    ):
+        check(path, isinstance(value, str) and value != "", "must be text")
     check(
-        "homeassistant.status_online",
-        isinstance(homeassistant["status_online"], str)
-        and homeassistant["status_online"] != "",
-        "must be text",
+        "status.offline",
+        configuration["status"]["online"] != configuration["status"]["offline"],
+        "must be different to `status.online`",
     )
 
+    # Checked here, a command that can't be split would otherwise only fail
+    # once the battery is already low
     for path, value in (
         ("system.shutdown", configuration["system"]["shutdown"]),
         ("system.restart", configuration["system"]["restart"]),
     ):
-        check(path, isinstance(value, str) and value.strip() != "", "must be a command")
+        check(path, _is_command(value), "must be a command")
 
+    return errors
+
+
+def _is_command(value: Any) -> bool:
+    """Check for a command that shlex can split into at least one argument."""
+    if not isinstance(value, str):
+        return False
+    try:
+        return bool(shlex.split(value))
+    except ValueError:
+        # An unbalanced quote or a trailing escape
+        return False
+
+
+def _validate_fields(fields: dict[str, Any]) -> list[str]:
+    """Check each field is a mapping with a usable name and type.
+
+    A new field must give both, and an existing one can't be replaced with a
+    plain value, as every field is read as a mapping.
+    """
+    errors = []
+    for key, field in fields.items():
+        if not isinstance(field, dict):
+            errors.append(f"`fields.{key}` must be a mapping, got {field!r}")
+            continue
+        name = field.get("name")
+        if not isinstance(name, str) or not FIELD_NAME_PATTERN.fullmatch(name):
+            errors.append(
+                f"`fields.{key}.name` must be letters, digits and _, not starting "
+                f"with a digit, got {name!r}",
+            )
+        errors.extend(
+            f"`fields.{key}.{limit}` must be a number, got {field[limit]!r}"
+            for limit in ("min", "max", "step")
+            if field.get(limit) is not None and not _is_number(field[limit])
+        )
+        if field.get("type") not in FIELD_TYPES:
+            errors.append(
+                f"`fields.{key}.type` must be one of "
+                f"{', '.join(sorted(FIELD_TYPES))}, got {field.get('type')!r}",
+            )
     return errors
 
 
@@ -315,9 +415,18 @@ class DynamicConfiguration:
 
     _dynamic_file: str
 
-    def __init__(self, dynamic_file: str) -> None:
-        """Initialise the Dynamic Configuration object."""
+    def __init__(
+        self,
+        dynamic_file: str,
+        fields: dict[str, Any] | None = None,
+    ) -> None:
+        """Initialise the Dynamic Configuration object.
+
+        `fields` is the static field configuration, used to range check the
+        stored values against each number's `min` and `max`.
+        """
         self._dynamic_file = dynamic_file
+        self._fields = fields or {}
         self.event = EventEmitter()
 
         self.data = self._load()
@@ -337,19 +446,31 @@ class DynamicConfiguration:
         }
 
         dynamic_path = Path(self._dynamic_file)
+        dynamic_file_override: Any = {}
         if not dynamic_path.exists():
-            with dynamic_path.open("w") as file:
-                json.dump(dynamic_file_defaults, file)
-
-        try:
-            with dynamic_path.open() as file:
-                dynamic_file_override = json.load(file)
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            logger.warning(
-                "Unable to read %s, using the default settings",
-                self._dynamic_file,
-            )
-            dynamic_file_override = {}
+            # Without the file the defaults are used, and the low battery
+            # shutdown still works, so a missing folder or read-only storage
+            # must not stop the service
+            try:
+                with dynamic_path.open("w") as file:
+                    json.dump(dynamic_file_defaults, file)
+            except OSError as error:
+                logger.warning(
+                    "Unable to create %s (%s), using the default settings, "
+                    "changes made from MQTT won't be kept after a restart",
+                    self._dynamic_file,
+                    error,
+                )
+        else:
+            try:
+                with dynamic_path.open() as file:
+                    dynamic_file_override = json.load(file)
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError) as error:
+                logger.warning(
+                    "Unable to read %s (%s), using the default settings",
+                    self._dynamic_file,
+                    error,
+                )
 
         if not isinstance(dynamic_file_override, dict):
             logger.warning(
@@ -368,10 +489,16 @@ class DynamicConfiguration:
         # negative capacity is meaningless.
         for key, default in dynamic_file_defaults.items():
             value = data[key]
+            field = self._fields.get(key) or {}
+            minimum = field.get("min")
+            maximum = field.get("max")
             if (
                 not _is_number(value)
                 or (key == "report_interval" and value <= 0)
                 or (key == "battery_capacity" and value < 0)
+                # The same range a value received over MQTT is checked against
+                or (_is_number(minimum) and value < minimum)
+                or (_is_number(maximum) and value > maximum)
             ):
                 logger.warning(
                     "Invalid %s value %r in %s, using the default %s",
@@ -407,11 +534,21 @@ class DynamicConfiguration:
         """
         dynamic_path = Path(self._dynamic_file)
         temporary_path = dynamic_path.with_name(f"{dynamic_path.name}.tmp")
-        with temporary_path.open("w") as file:
-            json.dump(self.data, file)
-            file.flush()
-            os.fsync(file.fileno())
-        temporary_path.replace(dynamic_path)
+        try:
+            with temporary_path.open("w") as file:
+                json.dump(self.data, file)
+                file.flush()
+                os.fsync(file.fileno())
+            temporary_path.replace(dynamic_path)
+        except OSError as error:
+            # The new value is still used until the service restarts. This is
+            # called from the MQTT thread, so it must not raise.
+            logger.error(  # noqa: TRY400
+                "Unable to save the settings to %s (%s), the change is used "
+                "but won't be kept after a restart",
+                self._dynamic_file,
+                error,
+            )
 
 
 class LinkedConfiguration:
@@ -432,13 +569,23 @@ class LinkedConfiguration:
         self._dynamic_file = dynamic_file
 
         self.static = self._load()
-        self.dynamic = DynamicConfiguration(self._dynamic_file)
+        self.dynamic = DynamicConfiguration(
+            self._dynamic_file,
+            self.static["fields"],
+        )
 
     def _load(self) -> dict[str, Any]:
         """Load static configuration file, and override defaults."""
-        with Path(self._static_file).open() as static_file:
-            # An empty file loads as None
-            static_file_override = yaml.safe_load(static_file) or {}
+        try:
+            with Path(self._static_file).open() as static_file:
+                # An empty file loads as None
+                static_file_override = yaml.safe_load(static_file) or {}
+        except OSError as error:
+            msg = f"Unable to read {self._static_file}: {error.strerror or error}"
+            raise ConfigurationError(msg) from error
+        except yaml.YAMLError as error:
+            msg = f"{self._static_file} is not valid YAML: {error}"
+            raise ConfigurationError(msg) from error
 
         if not isinstance(static_file_override, dict):
             msg = f"{self._static_file} must contain a mapping of options"

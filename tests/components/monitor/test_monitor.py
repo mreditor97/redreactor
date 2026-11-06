@@ -1068,3 +1068,35 @@ def test_stop_ends_publishing(monitor, mock_ina):
     assert published == []
     assert monitor.monitor_timer.is_running is False
     assert monitor.report_timer.is_running is False
+
+
+def test_monitor_i2c_read_error_skips_the_reading(monitor, mock_ina, caplog):
+    """A failed I2C read is logged once and the reading is skipped.
+
+    The error used to escape the timer thread with a traceback on every tick,
+    and the low battery checks then ran on the stale values.
+    """
+    mock_ina.voltage.side_effect = OSError(121, "Remote I/O error")
+
+    with patch.object(monitor, "_update") as update, caplog.at_level("ERROR"):
+        monitor._monitor(ina=mock_ina)
+        monitor._monitor(ina=mock_ina)
+
+    update.assert_not_called()
+    assert caplog.text.count("Unable to read the Red Reactor") == 1
+    assert monitor._read_failures == 2
+
+
+def test_monitor_recovers_after_i2c_read_error(monitor, mock_ina, caplog):
+    """Readings carry on once the I2C reads work again."""
+    mock_ina.voltage.side_effect = OSError(121, "Remote I/O error")
+    with patch.object(monitor, "_update"):
+        monitor._monitor(ina=mock_ina)
+
+    mock_ina.voltage.side_effect = None
+    with patch.object(monitor, "_update"):
+        _run_monitor_with_ina(monitor, mock_ina, voltage=3.9, current=50.0)
+
+    assert monitor._read_failures == 0
+    assert monitor.data.voltage == 3.9
+    assert "after 1 failed readings" in caplog.text

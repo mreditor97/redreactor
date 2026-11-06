@@ -469,3 +469,101 @@ def test_on_command_stops_the_monitor_before_going_offline(commander, event_type
         cmd._on_command(event_type)
 
     assert order.index("stop") < order.index("offline")
+
+
+def test_on_message_ignores_a_large_payload(commander, static_config, dynamic_config):
+    """A payload far larger than a number is refused before it is decoded."""
+    cmd, _ = commander
+    topic = "/".join(
+        (
+            static_config["mqtt"]["base_topic"],
+            static_config["hostname"]["name"],
+            static_config["mqtt"]["topic"]["set"],
+            "report_interval",
+        ),
+    )
+    before = dict(dynamic_config.data)
+
+    with patch.object(cmd.logger, "warning") as mock_warn:
+        cmd._on_message(None, None, _make_mock_message(topic, "1" * 10_000))
+
+    assert "too large" in mock_warn.call_args.args[0]
+    assert dynamic_config.data == before
+
+
+def test_on_message_deeply_nested_json_is_ignored(commander, static_config):
+    """Nested JSON that raises RecursionError is only logged.
+
+    The size limit already stops this payload, so the limit is raised here to
+    check the decode error is caught too. It used to stop the service.
+    """
+    cmd, _ = commander
+    topic = "/".join(
+        (
+            static_config["mqtt"]["base_topic"],
+            static_config["hostname"]["name"],
+            static_config["mqtt"]["topic"]["set"],
+            "report_interval",
+        ),
+    )
+    payload = "[" * 100_000 + "]" * 100_000
+
+    with (
+        patch(
+            "redreactor.components.commander.commander.COMMAND_PAYLOAD_MAXIMUM",
+            len(payload),
+        ),
+        patch.object(cmd.logger, "warning") as mock_warn,
+    ):
+        cmd._on_message(None, None, _make_mock_message(topic, payload))
+
+    assert "not valid JSON" in mock_warn.call_args.args[0]
+
+
+def test_on_command_unsplittable_command_still_disconnects(commander, static_config):
+    """A command shlex can't split is logged, and the service still exits.
+
+    The readings are already stopped by then, so carrying on would leave the
+    service running but doing nothing.
+    """
+    cmd, _ = commander
+    from redreactor.components.mqtt import MQTT
+
+    static_config["system"]["shutdown"] = "echo 'unbalanced"
+    MQTT.event.on("publish", lambda **_: None)
+    disconnect_calls: list[bool] = []
+    MQTT.event.on("disconnect", lambda: disconnect_calls.append(True))
+
+    with patch("time.sleep"), patch.object(cmd.logger, "exception") as mock_exc:
+        cmd._on_command("shutdown")
+
+    mock_exc.assert_called_once()
+    assert disconnect_calls == [True]
+
+
+def test_on_command_hanging_command_times_out(commander):
+    """A command that never finishes is given up on, then disconnects."""
+    import subprocess
+
+    from redreactor.components.mqtt import MQTT
+    from redreactor.const import SYSTEM_COMMAND_TIMEOUT
+
+    cmd, _ = commander
+    MQTT.event.on("publish", lambda **_: None)
+    disconnect_calls: list[bool] = []
+    MQTT.event.on("disconnect", lambda: disconnect_calls.append(True))
+
+    target = "redreactor.components.commander.commander.subprocess.run"
+    with (
+        patch(
+            target,
+            side_effect=subprocess.TimeoutExpired("sleep", SYSTEM_COMMAND_TIMEOUT),
+        ) as mock_run,
+        patch("time.sleep"),
+        patch.object(cmd.logger, "error") as mock_error,
+    ):
+        cmd._on_command("restart")
+
+    assert mock_run.call_args.kwargs["timeout"] == SYSTEM_COMMAND_TIMEOUT
+    assert "did not finish" in mock_error.call_args.args[0]
+    assert disconnect_calls == [True]

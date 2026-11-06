@@ -81,3 +81,54 @@ def test_log_file_is_rotated(config_files):
     assert handlers
     assert handlers[-1].maxBytes == DEFAULT_LOG_MAX_BYTES
     assert handlers[-1].backupCount == DEFAULT_LOG_BACKUP_COUNT
+
+
+def test_invalid_configuration_exits_without_a_traceback(tmp_path, caplog):
+    """A configuration problem is one clear line, then exit 1."""
+    from redreactor import __main__
+
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text("mqtt: {port: 0}\n")
+    argv = [
+        "redreactor",
+        "--config",
+        str(static_file),
+        "--database",
+        str(tmp_path / "database.db"),
+        "--log",
+        str(tmp_path / "redreactor.log"),
+    ]
+
+    with patch.object(sys, "argv", argv), pytest.raises(SystemExit) as exit_info:
+        __main__.main()
+
+    assert exit_info.value.code == 1
+    assert "`mqtt.port`" in caplog.text
+    assert all(record.exc_info is None for record in caplog.records)
+
+
+def test_log_file_that_cannot_be_opened_uses_the_console(tmp_path, caplog):
+    """A log file in a missing folder doesn't stop the service starting."""
+    from redreactor import __main__
+
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text("")
+    argv = [
+        "redreactor",
+        "--config",
+        str(static_file),
+        "--database",
+        str(tmp_path / "database.db"),
+        "--log",
+        str(tmp_path / "missing" / "redreactor.log"),
+        "--check",
+    ]
+
+    with (
+        patch.object(sys, "argv", argv),
+        patch.object(__main__, "read_once", return_value={}) as read_once,
+    ):
+        __main__.main()
+
+    read_once.assert_called_once()
+    assert "Unable to open the log file" in caplog.text
