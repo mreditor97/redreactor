@@ -22,6 +22,7 @@ from redreactor.const import (
     BATTERY_AVERAGE_READINGS_MAXIMUM,
     DEFAULT_BATTERY_AVERAGE_READINGS,
     DEFAULT_BATTERY_INTERNAL_RESISTANCE,
+    DEFAULT_BATTERY_REPORT_LEVEL_CHANGE,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
     DEFAULT_BATTERY_VOLTAGE_MINIMUM,
@@ -91,6 +92,7 @@ def _convert_quoted_values(configuration: dict[str, Any]) -> None:
         ("ina", "adc_samples"),
         ("battery", "internal_resistance"),
         ("battery", "average_readings"),
+        ("battery", "report_level_change"),
     ):
         value = configuration[section][key]
         if isinstance(value, str):
@@ -271,6 +273,14 @@ def _validate_static(configuration: dict[str, Any]) -> list[str]:  # noqa: C901
         f"must be a whole number from 1 to {BATTERY_AVERAGE_READINGS_MAXIMUM}",
     )
     check(
+        "battery.report_level_change",
+        _is_number(configuration["battery"]["report_level_change"])
+        and 0
+        <= configuration["battery"]["report_level_change"]
+        <= 100,  # noqa: PLR2004
+        "must be a number of percentage points from 0 to 100, 0 turns it off",
+    )
+    check(
         "battery.internal_resistance",
         _is_number(configuration["battery"]["internal_resistance"])
         and configuration["battery"]["internal_resistance"] >= 0,
@@ -434,14 +444,22 @@ class DynamicConfiguration:
         self,
         dynamic_file: str,
         fields: dict[str, Any] | None = None,
+        static_defaults: dict[str, Any] | None = None,
     ) -> None:
         """Initialise the Dynamic Configuration object.
 
         `fields` is the static field configuration, used to range check the
         stored values against each number's `min` and `max`.
+
+        `static_defaults` are settings whose default comes from the static
+        configuration, such as the monitor interval. They are only saved while
+        they differ from it, so a change to the static file still applies until
+        the setting is changed from MQTT, and setting it back to the static
+        value hands it back to the static file.
         """
         self._dynamic_file = dynamic_file
         self._fields = fields or {}
+        self._static_defaults = static_defaults or {}
         self.event = EventEmitter()
 
         self.data = self._load()
@@ -454,7 +472,7 @@ class DynamicConfiguration:
         """Load dynamic configuration file."""
         dynamic_file_defaults: dict[str, Any] = {
             key: default for key, (_, default) in DYNAMIC_SETTINGS.items()
-        }
+        } | self._static_defaults
 
         dynamic_path = Path(self._dynamic_file)
         dynamic_file_override: Any = {}
@@ -464,7 +482,7 @@ class DynamicConfiguration:
             # must not stop the service
             try:
                 with dynamic_path.open("w") as file:
-                    json.dump(dynamic_file_defaults, file)
+                    json.dump(self._saved(dynamic_file_defaults), file)
             except OSError as error:
                 logger.warning(
                     "Unable to create %s (%s), using the default settings, "
@@ -499,13 +517,17 @@ class DynamicConfiguration:
         # report interval of 0 or less would spin the report timer, and a
         # negative capacity is meaningless.
         for key, default in dynamic_file_defaults.items():
+            if key in self._static_defaults and key not in dynamic_file_override:
+                # Checked with the static configuration already
+                continue
             value = data[key]
             field = self._fields.get(key) or {}
             minimum = field.get("min")
             maximum = field.get("max")
             if (
                 not _is_number(value)
-                or (key == "report_interval" and value <= 0)
+                or (key in {"report_interval", "monitor_interval"} and value <= 0)
+                or (key in {"average_readings", "shutdown_readings"} and value < 1)
                 or (key == "battery_capacity" and value < 0)
                 # The same range a value received over MQTT is checked against
                 or (_is_number(minimum) and value < minimum)
@@ -537,6 +559,14 @@ class DynamicConfiguration:
 
         return data
 
+    def _saved(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Return the settings to save, leaving out unchanged static defaults."""
+        return {
+            key: value
+            for key, value in data.items()
+            if key not in self._static_defaults or value != self._static_defaults[key]
+        }
+
     def write(self) -> None:
         """Write dynamic configuration file.
 
@@ -547,7 +577,7 @@ class DynamicConfiguration:
         temporary_path = dynamic_path.with_name(f"{dynamic_path.name}.tmp")
         try:
             with temporary_path.open("w") as file:
-                json.dump(self.data, file)
+                json.dump(self._saved(self.data), file)
                 file.flush()
                 os.fsync(file.fileno())
             temporary_path.replace(dynamic_path)
@@ -583,6 +613,10 @@ class LinkedConfiguration:
         self.dynamic = DynamicConfiguration(
             self._dynamic_file,
             self.static["fields"],
+            static_defaults={
+                "monitor_interval": self.static["ina"]["monitor_interval"],
+                "average_readings": self.static["battery"]["average_readings"],
+            },
         )
 
     def _load(self) -> dict[str, Any]:
@@ -775,6 +809,37 @@ class LinkedConfiguration:
                     "mode": "box",
                     "step": 1,
                 },
+                "monitor_interval": {
+                    "name": "monitor_interval",
+                    "pretty": "Monitor interval",
+                    "type": "number",
+                    "unit": "s",
+                    "entity_category": "diagnostic",
+                    "min": 0.5,
+                    "max": 300,
+                    "mode": "box",
+                    "step": 0.5,
+                },
+                "average_readings": {
+                    "name": "average_readings",
+                    "pretty": "Readings averaged",
+                    "type": "number",
+                    "entity_category": "diagnostic",
+                    "min": 1,
+                    "max": BATTERY_AVERAGE_READINGS_MAXIMUM,
+                    "mode": "box",
+                    "step": 1,
+                },
+                "shutdown_readings": {
+                    "name": "shutdown_readings",
+                    "pretty": "Shutdown confirmation readings",
+                    "type": "number",
+                    "entity_category": "diagnostic",
+                    "min": 1,
+                    "max": 20,
+                    "mode": "box",
+                    "step": 1,
+                },
                 "battery_time_remaining": {
                     "name": "battery_time_remaining",
                     "pretty": "Battery time remaining",
@@ -782,6 +847,38 @@ class LinkedConfiguration:
                     "unit": "d",
                     "device_class": "duration",
                     "suggested_display_precision": 1,
+                },
+                "sensor_problem": {
+                    "name": "sensor_problem",
+                    "pretty": "Sensor problem",
+                    "type": "binary_sensor",
+                    "device_class": "problem",
+                    "entity_category": "diagnostic",
+                },
+                "last_shutdown": {
+                    "name": "last_shutdown",
+                    "pretty": "Last shutdown",
+                    "type": "sensor",
+                    "entity_category": "diagnostic",
+                    "state_class": None,
+                },
+                "last_shutdown_time": {
+                    "name": "last_shutdown_time",
+                    "pretty": "Last shutdown time",
+                    "type": "sensor",
+                    "device_class": "timestamp",
+                    "entity_category": "diagnostic",
+                    "state_class": None,
+                },
+                "last_shutdown_voltage": {
+                    "name": "last_shutdown_voltage",
+                    "pretty": "Last shutdown voltage",
+                    "type": "sensor",
+                    "unit": "V",
+                    "device_class": "voltage",
+                    "entity_category": "diagnostic",
+                    "state_class": None,
+                    "suggested_display_precision": 2,
                 },
                 "power_event": {
                     "name": "power_event",
@@ -798,6 +895,12 @@ class LinkedConfiguration:
                 "shutdown": {
                     "name": "shutdown",
                     "pretty": "Shutdown",
+                    "type": "button",
+                    "entity_category": "diagnostic",
+                },
+                "refresh": {
+                    "name": "refresh",
+                    "pretty": "Refresh",
                     "type": "button",
                     "entity_category": "diagnostic",
                 },
@@ -820,6 +923,9 @@ class LinkedConfiguration:
                 # Pairs of [resting voltage, battery level %], None uses a
                 # straight line between the minimum and maximum voltage
                 "curve": None,
+                # Battery level change, in percentage points, reported straight
+                # away instead of at the next report interval, 0 turns it off
+                "report_level_change": DEFAULT_BATTERY_REPORT_LEVEL_CHANGE,
             },
             "system": {
                 "shutdown": "sudo shutdown 0 -h",

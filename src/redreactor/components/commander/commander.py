@@ -19,7 +19,11 @@ from redreactor.components.mqtt import MQTT
 from redreactor.const import (
     COMMAND_PAYLOAD_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
+    LAST_SHUTDOWN_KEY,
     POWER_EVENT_SHUTDOWN_STARTED,
+    SHUTDOWN_REASON_LOW_BATTERY,
+    SHUTDOWN_REASON_RESTART_BUTTON,
+    SHUTDOWN_REASON_SHUTDOWN_BUTTON,
     SYSTEM_COMMAND_TIMEOUT,
 )
 from redreactor.helpers.emitter import EventEmitter
@@ -146,10 +150,24 @@ class Commander:
             )
             # Run off the MQTT network thread: publishes made from inside a
             # paho callback are only queued, and sleeping here would block
-            # the loop that has to deliver the offline status.
+            # the loop that has to deliver the offline status. A reading can
+            # also take a while on a busy I2C bus.
+            if field == "refresh":
+                target: Any = self._monitor.refresh
+                kwargs: dict[str, Any] = {}
+            else:
+                target = self._on_command
+                kwargs = {
+                    "event_type": field,
+                    "reason": (
+                        SHUTDOWN_REASON_RESTART_BUTTON
+                        if field == "restart"
+                        else SHUTDOWN_REASON_SHUTDOWN_BUTTON
+                    ),
+                }
             threading.Thread(
-                target=self._on_command,
-                kwargs={"event_type": field},
+                target=target,
+                kwargs=kwargs,
                 name=f"redreactor-{field}",
             ).start()
             return
@@ -238,10 +256,15 @@ class Commander:
 
         return True
 
-    def _on_command(self, event_type: Literal["shutdown", "restart"]) -> None:
+    def _on_command(
+        self,
+        event_type: Literal["shutdown", "restart"],
+        reason: str = SHUTDOWN_REASON_SHUTDOWN_BUTTON,
+    ) -> None:
         """Commander's on command event.
 
-        Must contain an event_type of 'shutdown' or 'restart'.
+        Must contain an event_type of 'shutdown' or 'restart'. The reason is
+        saved, and reported as the last shutdown after the next start.
         """
         # Check to ensure that the event_type is either shutdown or restart
         if event_type not in {"shutdown", "restart"}:
@@ -265,6 +288,8 @@ class Commander:
 
         # Stop the readings, so nothing publishes online after the offline below
         self._monitor.stop()
+
+        self._save_last_shutdown(event_type, reason)
 
         # Publish to MQTT the offline state, before shutting down or restarting
         MQTT.event.emit(
@@ -319,6 +344,23 @@ class Commander:
         # thread, which then exits the program.
         MQTT.event.emit(event_name="disconnect")
 
+    def _save_last_shutdown(self, event_type: str, reason: str) -> None:
+        """Save why the device is shutting down or restarting.
+
+        Saved before the command runs, as nothing runs after a shutdown. It
+        is written straight to the file, rather than through the `write`
+        event, which would also send a report after the offline status.
+        """
+        data = self._monitor.data
+        self._dynamic_configuration.data[LAST_SHUTDOWN_KEY] = {
+            "reason": reason,
+            "action": event_type,
+            "voltage": None if data.sensor_problem else round(data.voltage, 3),
+            "battery_level": None if data.sensor_problem else data.battery_level,
+            "time": datetime.now(tz=UTC).isoformat(timespec="seconds"),
+        }
+        self._dynamic_configuration.write()
+
     def _shutdown(self) -> None:
         """Shutdown event hook."""
-        self._on_command(event_type="shutdown")
+        self._on_command(event_type="shutdown", reason=SHUTDOWN_REASON_LOW_BATTERY)

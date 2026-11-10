@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from redreactor.components.monitor.data import MonitorData
 from redreactor.helpers.emitter import EventEmitter
 
 # ---------------------------------------------------------------------------
@@ -44,6 +45,7 @@ def commander(static_config, dynamic_config):
 
     mock_monitor = MagicMock()
     mock_monitor.event = Monitor.event  # Use the class-level emitter
+    mock_monitor.data = MonitorData(voltage=3.25, battery_level=4)
 
     cmd = Commander(
         static_configuration=static_config,
@@ -103,7 +105,7 @@ def test_on_message_button_calls_on_command(commander, static_config):
             if thread.name == "redreactor-shutdown":
                 thread.join(timeout=5)
 
-    mock_cmd.assert_called_once_with(event_type="shutdown")
+    mock_cmd.assert_called_once_with(event_type="shutdown", reason="Shutdown button")
 
 
 def test_on_message_button_runs_off_the_mqtt_thread(commander, static_config):
@@ -123,7 +125,10 @@ def test_on_message_button_runs_off_the_mqtt_thread(commander, static_config):
     mock_cmd.assert_not_called()
     mock_thread.assert_called_once()
     assert mock_thread.call_args.kwargs["target"] is mock_cmd
-    assert mock_thread.call_args.kwargs["kwargs"] == {"event_type": "restart"}
+    assert mock_thread.call_args.kwargs["kwargs"] == {
+        "event_type": "restart",
+        "reason": "Restart button",
+    }
     mock_thread.return_value.start.assert_called_once()
 
 
@@ -569,3 +574,85 @@ def test_on_command_hanging_command_times_out(commander):
     assert mock_run.call_args.kwargs["timeout"] == SYSTEM_COMMAND_TIMEOUT
     assert "did not finish" in mock_error.call_args.args[0]
     assert disconnect_calls == [True]
+
+
+# ---------------------------------------------------------------------------
+# Refresh button and the last shutdown
+# ---------------------------------------------------------------------------
+
+
+def test_refresh_button_takes_a_reading(commander):
+    """The refresh button runs the monitor's refresh, off the MQTT thread."""
+    cmd, mock_monitor = commander
+    topic = "redreactor/redreactor/set/refresh"
+
+    target = "redreactor.components.commander.commander.threading.Thread"
+    with patch(target) as mock_thread, patch.object(cmd, "_on_command") as mock_cmd:
+        cmd._on_message(None, None, _make_mock_message(topic, json.dumps("PRESS")))
+
+    mock_cmd.assert_not_called()
+    assert mock_thread.call_args.kwargs["target"] is mock_monitor.refresh
+    assert mock_thread.call_args.kwargs["kwargs"] == {}
+    mock_thread.return_value.start.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    ("event_type", "reason", "trigger"),
+    [
+        ("shutdown", "Low battery", "low battery"),
+        ("shutdown", "Shutdown button", "shutdown"),
+        ("restart", "Restart button", "restart"),
+    ],
+)
+def test_last_shutdown_is_saved_before_the_command(
+    commander,
+    tmp_path,
+    event_type,
+    reason,
+    trigger,
+):
+    """The reason, voltage and time are saved before the command runs."""
+    cmd, _ = commander
+    saved: list[dict] = []
+
+    def run(*_args: object, **_kwargs: object) -> MagicMock:
+        # Read back from the file, as nothing runs after a shutdown
+        saved.append(json.loads((tmp_path / "dynamic.json").read_text()))
+        return MagicMock(returncode=0)
+
+    target = "redreactor.components.commander.commander.subprocess.run"
+    with patch(target, side_effect=run), patch("time.sleep"):
+        if trigger == "low battery":
+            cmd._shutdown()
+        elif trigger == "shutdown":
+            cmd._on_message(
+                None,
+                None,
+                _make_mock_message("redreactor/redreactor/set/shutdown", "true"),
+            )
+            for thread in threading.enumerate():
+                if thread.name == "redreactor-shutdown":
+                    thread.join(timeout=5)
+        else:
+            cmd._on_command(event_type, reason=reason)
+
+    last_shutdown = saved[0]["last_shutdown"]
+    assert last_shutdown["reason"] == reason
+    assert last_shutdown["action"] == event_type
+    assert last_shutdown["voltage"] == 3.25
+    assert last_shutdown["battery_level"] == 4
+    assert last_shutdown["time"].endswith("+00:00")
+
+
+def test_last_shutdown_has_no_reading_with_a_sensor_problem(commander, tmp_path):
+    """The voltage isn't saved when the INA219 can't be read."""
+    cmd, mock_monitor = commander
+    mock_monitor.data.sensor_problem = True
+
+    target = "redreactor.components.commander.commander.subprocess.run"
+    with patch(target), patch("time.sleep"):
+        cmd._on_command("shutdown")
+
+    last_shutdown = json.loads((tmp_path / "dynamic.json").read_text())["last_shutdown"]
+    assert last_shutdown["voltage"] is None
+    assert last_shutdown["battery_level"] is None

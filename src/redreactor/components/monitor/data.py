@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from redreactor.const import (
+    DEFAULT_BATTERY_AVERAGE_READINGS,
     DEFAULT_BATTERY_CAPACITY,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MINIMUM,
     DEFAULT_BATTERY_WARNING_THRESHOLD,
+    DEFAULT_INA_MONITOR_INTERVAL,
     DEFAULT_REPORT_INTERVAL,
+    DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS,
 )
 
 
@@ -29,6 +34,14 @@ class MonitorData:
     report_interval: int
     battery_capacity: int
     battery_time_remaining: float | None
+    monitor_interval: float
+    average_readings: int
+    shutdown_readings: int
+    # Set after several INA219 reads in a row have failed
+    sensor_problem: bool
+    # The last shutdown or restart this service started, from the dynamic
+    # configuration: its reason, the battery voltage and the time
+    last_shutdown: dict[str, Any] | None
 
     def __init__(  # noqa: PLR0913, PLR0917
         self,
@@ -47,6 +60,11 @@ class MonitorData:
         report_interval: int = DEFAULT_REPORT_INTERVAL,
         battery_capacity: int = DEFAULT_BATTERY_CAPACITY,
         battery_time_remaining: float | None = None,
+        monitor_interval: float = DEFAULT_INA_MONITOR_INTERVAL,
+        average_readings: int = DEFAULT_BATTERY_AVERAGE_READINGS,
+        shutdown_readings: int = DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS,
+        sensor_problem: bool = False,  # noqa: FBT001, FBT002
+        last_shutdown: dict[str, Any] | None = None,
     ) -> None:
         """Initialise Monitor Data."""
         self.voltage = voltage
@@ -64,3 +82,8 @@ class MonitorData:
         self.report_interval = report_interval
         self.battery_capacity = battery_capacity
         self.battery_time_remaining = battery_time_remaining
+        self.monitor_interval = monitor_interval
+        self.average_readings = average_readings
+        self.shutdown_readings = shutdown_readings
+        self.sensor_problem = sensor_problem
+        self.last_shutdown = last_shutdown

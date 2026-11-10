@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import subprocess
 import sys
 import textwrap
@@ -93,12 +94,16 @@ class Recorder:
         self,
         test: Callable[[str, str], bool],
         description: str,
+        after: int = 0,
     ) -> tuple[str, str]:
-        """Wait for a message that passes the test and return it."""
+        """Wait for a message that passes the test and return it.
+
+        Only the messages from index `after` on are looked at.
+        """
         deadline = time.monotonic() + TIMEOUT
         with self._condition:
             while True:
-                for topic, payload, _ in self.messages:
+                for topic, payload, _ in self.messages[after:]:
                     if test(topic, payload):
                         return topic, payload
                 remaining = deadline - time.monotonic()
@@ -113,7 +118,53 @@ class Recorder:
         self.client.disconnect()
 
 
-def test_service_reports_and_takes_commands(tmp_path: Path) -> None:
+def _start_service(
+    tmp_path: Path,
+    configuration: Path,
+    database: Path,
+    notify_socket: Path,
+) -> subprocess.Popen[str]:
+    """Run the service as systemd would, with its notify socket and watchdog."""
+    return subprocess.Popen(  # noqa: S603
+        [
+            sys.executable,
+            "-m",
+            "redreactor",
+            "--config",
+            str(configuration),
+            "--database",
+            str(database),
+            "--log",
+            str(tmp_path / "redreactor.log"),
+        ],
+        env=os.environ
+        | {
+            "PYTHONPATH": str(tmp_path / "fake"),
+            "NOTIFY_SOCKET": str(notify_socket),
+            # A ping every second
+            "WATCHDOG_USEC": "2000000",
+        },
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
+
+def _stop_service(service: subprocess.Popen[str]) -> str:
+    """Stop the service if it is still running, and return its output.
+
+    Returns nothing when its output has been read already.
+    """
+    if service.stdout is None or service.stdout.closed:
+        return ""
+    if service.poll() is None:
+        service.kill()
+    output, _ = service.communicate()
+    return output
+
+
+# One scenario from start to restart, as each step needs the one before
+def test_service_reports_and_takes_commands(tmp_path: Path) -> None:  # noqa: PLR0915
     """Start the service, read its reports, change a setting and restart it."""
     host, _, port = BROKER.rpartition(":")
     hostname = f"ci-{uuid.uuid4().hex[:8]}"
@@ -136,29 +187,19 @@ def test_service_reports_and_takes_commands(tmp_path: Path) -> None:
         ),
     )
     database = tmp_path / "database.db"
+    notify_socket = tmp_path / "notify"
+    systemd = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    systemd.bind(str(notify_socket))
+    systemd.settimeout(TIMEOUT)
 
     recorder = Recorder(
         host,
         int(port),
         [f"{device}/#", "homeassistant/device/+/config"],
     )
-    service = subprocess.Popen(  # noqa: S603
-        [
-            sys.executable,
-            "-m",
-            "redreactor",
-            "--config",
-            str(configuration),
-            "--database",
-            str(database),
-            "--log",
-            str(tmp_path / "redreactor.log"),
-        ],
-        env=os.environ | {"PYTHONPATH": str(fake)},
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
+    service = _start_service(tmp_path, configuration, database, notify_socket)
+    second_service: subprocess.Popen[str] | None = None
+    output = ""
     try:
         recorder.wait_for(
             lambda topic, payload: topic == f"{device}/status" and payload == "online",
@@ -168,12 +209,18 @@ def test_service_reports_and_takes_commands(tmp_path: Path) -> None:
             lambda topic, _: topic == f"{device}/state",
             "state report",
         )
+        # Started under systemd: ready, then the watchdog pings
+        assert systemd.recv(64) == b"READY=1"
+        assert systemd.recv(64) == b"WATCHDOG=1"
+
         reading = json.loads(state)
         assert reading["voltage"] == pytest.approx(3.9)
         # Published negative while the battery is discharging
         assert reading["current"] == pytest.approx(-300, abs=0.2)
         assert reading["power"] == pytest.approx(1.17, abs=0.01)
         assert reading["external_power"] == "OFF"
+        assert reading["sensor_problem"] == "OFF"
+        assert reading["last_shutdown"] is None
 
         _, discovery = recorder.wait_for(
             lambda topic, _: topic.endswith(f"redreactor_{hostname}/config")
@@ -183,6 +230,17 @@ def test_service_reports_and_takes_commands(tmp_path: Path) -> None:
         components = json.loads(discovery)["components"]
         assert components["voltage"]["platform"] == "sensor"
         assert components["shutdown"]["platform"] == "button"
+        assert components["refresh"]["platform"] == "button"
+
+        # The refresh button sends a report straight away, rather than at the
+        # next report interval (30 seconds by default)
+        received = len(recorder.messages)
+        recorder.client.publish(f"{device}/set/refresh", "true", qos=1)
+        recorder.wait_for(
+            lambda topic, _: topic == f"{device}/state",
+            "report after refresh",
+            after=received,
+        )
 
         # A setting from Home Assistant is applied, reported and saved
         recorder.client.publish(f"{device}/set/report_interval", "60", qos=1)
@@ -210,10 +268,29 @@ def test_service_reports_and_takes_commands(tmp_path: Path) -> None:
             if topic.endswith("/status")
         ]
         assert status[-1] == "offline"
+        output = _stop_service(service)
+
+        # After the restart, the reason is reported as the last shutdown
+        second_service = _start_service(
+            tmp_path,
+            configuration,
+            database,
+            notify_socket,
+        )
+        _, state = recorder.wait_for(
+            lambda topic, payload: topic == f"{device}/state"
+            and json.loads(payload)["last_shutdown"] is not None,
+            "report with the last shutdown",
+        )
+        reading = json.loads(state)
+        assert reading["last_shutdown"] == "Restart button"
+        assert reading["last_shutdown_voltage"] == pytest.approx(3.9)
+        assert reading["last_shutdown_time"].endswith("+00:00")
     finally:
-        if service.poll() is None:
-            service.kill()
-        output, _ = service.communicate()
+        output += _stop_service(service)
+        if second_service is not None:
+            output += _stop_service(second_service)
+        systemd.close()
         # Clear the retained messages this test left on the broker
         for topic in (f"{device}/status", f"{device}/state"):
             recorder.client.publish(topic, "", retain=True).wait_for_publish(5)
