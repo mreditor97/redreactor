@@ -34,6 +34,15 @@ from redreactor.helpers.cpu_utils import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+
+@pytest.fixture(autouse=True)
+def _reset_cpu_cache():
+    """Each test starts without a zone or reader remembered from another."""
+    cpu_utils.reset_cache()
+    yield
+    cpu_utils.reset_cache()
+
+
 # ---------------------------------------------------------------------------
 # Fake sysfs helpers
 # ---------------------------------------------------------------------------
@@ -389,3 +398,77 @@ def test_decode_cpu_stat_text_historical_bits():
     result = decode_cpu_stat_text((1 << 16) | (1 << 18))
     assert "Under-voltage OCCURRED" in result
     assert "Throttling OCCURRED" in result
+
+
+# ---------------------------------------------------------------------------
+# Caching the working source
+# ---------------------------------------------------------------------------
+
+
+def test_preferred_reader_is_tried_first(monkeypatch):
+    """Once a later source works, the earlier ones aren't searched every time."""
+    calls = []
+
+    def first():
+        calls.append("first")
+
+    def second():
+        calls.append("second")
+        return 42.0
+
+    monkeypatch.setattr(cpu_utils, "read_cpu_temperature_sysfs", first)
+    monkeypatch.setattr(cpu_utils, "read_cpu_temperature_hwmon", second)
+
+    assert read_cpu_temperature() == 42.0
+    assert read_cpu_temperature() == 42.0
+
+    assert calls == ["first", "second", "second"]
+
+
+def test_preferred_reader_failing_searches_again(monkeypatch):
+    """When the source that worked stops working, the others are tried again."""
+    values = {"first": None, "second": 42.0}
+    monkeypatch.setattr(
+        cpu_utils,
+        "read_cpu_temperature_sysfs",
+        lambda: values["first"],
+    )
+    monkeypatch.setattr(
+        cpu_utils,
+        "read_cpu_temperature_hwmon",
+        lambda: values["second"],
+    )
+    monkeypatch.setattr(cpu_utils, "read_cpu_temperature_vcgencmd", lambda: None)
+
+    assert read_cpu_temperature() == 42.0
+
+    values["second"] = None
+    values["first"] = 50.0
+    assert read_cpu_temperature() == 50.0
+
+    values["first"] = None
+    assert read_cpu_temperature() is None
+
+
+def test_thermal_zone_is_found_once(tmp_path, monkeypatch):
+    """The CPU zone is only searched for again when it stops giving a reading."""
+    monkeypatch.setattr(cpu_utils, "THERMAL_ROOT", tmp_path / "thermal")
+    zone = _zone(tmp_path, 0, "cpu-thermal", 45000)
+
+    finds = []
+    original = cpu_utils.find_cpu_thermal_zone
+    monkeypatch.setattr(
+        cpu_utils,
+        "find_cpu_thermal_zone",
+        lambda: finds.append(1) or original(),
+    )
+
+    assert read_cpu_temperature_sysfs() == 45.0
+    _write(zone / "temp", "46000")
+    assert read_cpu_temperature_sysfs() == 46.0
+    assert len(finds) == 1
+
+    # A broken reading searches again
+    _write(zone / "temp", "garbage")
+    assert read_cpu_temperature_sysfs() is None
+    assert len(finds) == 2

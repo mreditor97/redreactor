@@ -38,6 +38,13 @@ REMOVED_ENTITIES = (
 )
 
 
+# Stored in the dynamic configuration once the discovery migration has run, so
+# it isn't repeated on every start. Increase it when REMOVED_ENTITIES changes,
+# so the new removals are sent once too.
+DISCOVERY_MIGRATION_KEY = "discovery_migration"
+DISCOVERY_MIGRATION_VERSION = 1
+
+
 # Base attributes that aren't part of an entity's discovery configuration
 COMPONENT_EXCLUDED_KEYS = frozenset({"configuration_topic", "device", "component_id"})
 
@@ -86,7 +93,13 @@ class Homeassistant:
         self._static_configuration = static_configuration
         self._dynamic_configuration = dynamic_configuration
         self.configuration = []
-        self._migrated = False
+        self._migrated = (
+            dynamic_configuration.data.get(DISCOVERY_MIGRATION_KEY)
+            == DISCOVERY_MIGRATION_VERSION
+        )
+        # The discovery JSON only changes with the expire after time, so it is
+        # built once and kept
+        self._discovery_json: str | None = None
         self._migration_lock = threading.Lock()
         self._online_lock = threading.Lock()
         self._online_timer: threading.Timer | None = None
@@ -255,6 +268,7 @@ class Homeassistant:
             expire_after,
         )
         self._expire_after = expire_after
+        self._discovery_json = None
         for entity in self.configuration:
             # Events never expire
             if entity.expire_after is not None:
@@ -349,10 +363,16 @@ class Homeassistant:
             "Publishing Homeassistant MQTT configuration / discovery information",
         )
 
+        if self._discovery_json is None:
+            self._discovery_json = json.dumps(
+                self._device_discovery_payload(),
+                cls=Encoder,
+            )
+
         MQTT.event.emit(
             event_name="publish",
             topic=self._device_discovery_topic,
-            payload=json.dumps(self._device_discovery_payload(), cls=Encoder),
+            payload=self._discovery_json,
         )
 
     def _migrate_discovery(self) -> None:
@@ -366,8 +386,9 @@ class Homeassistant:
         with an empty retained message. Removed entities, such as the raw CPU
         stat sensor, are sent an empty message, which deletes them.
 
-        Sent on every start, as Home Assistant may still have the old entities
-        loaded. Where it doesn't, Home Assistant ignores these messages.
+        Sent once, then recorded in the dynamic configuration so later starts
+        skip it. Where Home Assistant never had the old entities, it ignores
+        these messages.
         """
         legacy_topics = [str(field.configuration_topic) for field in self.configuration]
 
@@ -390,6 +411,12 @@ class Homeassistant:
                     payload="",
                     retain=True,
                 )
+            # Saved directly rather than through the `write` event, which
+            # would also send a report
+            self._dynamic_configuration.data[DISCOVERY_MIGRATION_KEY] = (
+                DISCOVERY_MIGRATION_VERSION
+            )
+            self._dynamic_configuration.write()
 
         # Give Home Assistant time to unload the old entities first, run off
         # the MQTT network thread so it isn't blocked while waiting
@@ -425,7 +452,10 @@ class Homeassistant:
     ) -> None:
         """On MQTT Connect, publish Home Assistant configuration."""
         self._update_homeassistant_configuration()
-        self.configuration_report_timer.start()
+        # 0 turns the repeat off, discovery is still sent on every connect and
+        # when Home Assistant comes online
+        if self.configuration_report_timer.interval > 0:
+            self.configuration_report_timer.start()
         # Home Assistant announces itself here when it (re)starts, so the
         # discovery configuration and latest readings can be sent again
         client.subscribe(topic=self._status_topic)

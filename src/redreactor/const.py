@@ -32,6 +32,10 @@ DEFAULT_INA_SHUNT_OHMS = 0.05  # Red Reactor Shunt Ohms
 DEFAULT_INA_MAX_EXPECTED_AMPS = 5.5
 DEFAULT_INA_MONITOR_INTERVAL = 5  # Second read time
 DEFAULT_INA_I2C_BUS = 1  # I2C bus the Red Reactor is connected to
+# Samples the INA219 averages in hardware for each bus and shunt reading. 1 is
+# a single 12-bit sample (532 us), 128 takes 68.1 ms per reading
+INA_ADC_SAMPLES = (1, 2, 4, 8, 16, 32, 64, 128)
+DEFAULT_INA_ADC_SAMPLES = 1
 
 # The log file lives on the SD card, so cap its size
 DEFAULT_LOG_MAX_BYTES = 1024 * 1024

@@ -126,6 +126,7 @@ Command topic | value:
 
 - `mqtt.user` and `mqtt.password` default to empty, which connects anonymously. Set both for a broker that needs a login
 - `ina.bus` is the I2C bus the Red Reactor is on (default `1`)
+- `ina.adc_samples` is how many samples the INA219 averages for each reading: `1` (default, a single 12-bit sample), `2`, `4`, `8`, `16`, `32`, `64` or `128`. More samples give steadier readings at no CPU cost, 128 takes about 68 ms per reading
 - `mqtt.tls` turns on TLS for the MQTT connection:
 
   ```yaml
@@ -147,7 +148,7 @@ Command topic | value:
 
 The configuration is checked at start-up. Any invalid value stops the service with one line naming each problem, for example `` `ina.monitor_interval` must be a number of seconds from 0.1 to 86400 ``. The limits checked include:
 
-- `ina.monitor_interval` from 0.1 to 86400 seconds, and `homeassistant.discovery_interval` from 1 to 86400 seconds
+- `ina.monitor_interval` from 0.1 to 86400 seconds, and `homeassistant.discovery_interval` from 1 to 86400 seconds, or `0` to only send discovery on connect and when Home Assistant comes online
 - `mqtt.timeout` (the keepalive) from 0 to 65535 seconds, and `mqtt.transport` one of `tcp`, `websockets` or `unix`
 - `system.shutdown` and `system.restart` must be commands that can be split into arguments, so an unclosed quote is found at start-up rather than when the battery is low
 - `status.online` and `status.offline` must be different, non-empty text

@@ -57,6 +57,23 @@ THROTTLED_MASK = (
 )
 
 
+# pi-ina219's ADC settings, the values of the INA219 configuration register's
+# bus and shunt ADC fields
+INA_ADC_12BIT = 3
+INA_ADC_2SAMP = 9
+
+
+def ina_adc_setting(samples: int) -> int:
+    """Return the pi-ina219 ADC setting that averages this many samples.
+
+    1 is the library's single 12-bit sample (ADC_12BIT = 3). Averaging 2 to
+    128 samples are ADC_2SAMP (9) to ADC_128SAMP (15), one step per doubling.
+    """
+    if samples <= 1:
+        return INA_ADC_12BIT
+    return INA_ADC_2SAMP + samples.bit_length() - 2
+
+
 def read_once(static_configuration: dict[str, Any]) -> dict[str, Any]:
     """Read the Red Reactor once, without starting the monitoring service.
 
@@ -72,16 +89,18 @@ def read_once(static_configuration: dict[str, Any]) -> dict[str, Any]:
             busnum=int(ina_configuration["bus"]),
             log_level=logging.ERROR,
         )
-        ina.configure(voltage_range=ina.RANGE_16V)
+        adc = ina_adc_setting(int(ina_configuration["adc_samples"]))
+        ina.configure(voltage_range=ina.RANGE_16V, bus_adc=adc, shunt_adc=adc)
+        voltage = ina.voltage()
         current = ina.current()
         return {
             "i2c_bus": int(ina_configuration["bus"]),
             "i2c_address": hex(ina_configuration["address"]),
-            "voltage": round(ina.voltage(), 3),
+            "voltage": round(voltage, 3),
             # Published negative while discharging, positive while charging.
             # Adding 0.0 turns -0.0 (a zero reading negated) into 0.0
             "current": round(-current, 4) + 0.0,
-            "power": round(ina.power() / 1000, 3),
+            "power": round(abs(voltage * current) / 1000, 3),
             "charging": current < 0,
         }
     except (OSError, ModuleNotFoundError, DeviceRangeError):
@@ -211,7 +230,8 @@ class Monitor:
                 busnum=int(static_configuration["ina"]["bus"]),
                 log_level=logging.ERROR,
             )
-            ina.configure(voltage_range=ina.RANGE_16V)
+            adc = ina_adc_setting(int(static_configuration["ina"]["adc_samples"]))
+            ina.configure(voltage_range=ina.RANGE_16V, bus_adc=adc, shunt_adc=adc)
         except (OSError, ModuleNotFoundError):
             self.logger.exception("Unable to connect to the Red Reactor")
 
@@ -254,9 +274,8 @@ class Monitor:
 
         Returns whether the battery is low enough to shut down.
         """
-        # Update the Dynamic Configuration to ensure the calculations will be based correctly off the changeable values # noqa: E501
-        self._update_dynamic_configuration()
-
+        # The dynamic configuration isn't read again here: a change from MQTT
+        # emits `write`, which runs `_update` and reads it straight away.
         shutdown: bool = False
 
         if ina:
@@ -267,8 +286,12 @@ class Monitor:
                     self.data.voltage,
                     self.data.current,
                 )
-                # pi-ina219 reports milliwatts, Home Assistant is sent watts
-                self.data.power = ina.power() / 1000
+                # Worked out here rather than read from the INA219, whose
+                # power() reads the overflow flag and the power register, two
+                # more I2C reads for what the chip calculates the same way.
+                # Volts x milliamps / 1000 is watts, always positive like the
+                # chip's own power register
+                self.data.power = abs(self.data.voltage * self.data.current) / 1000
                 # A negative current means the battery is being charged
                 self.data.charging = self.data.current < 0
             except DeviceRangeError:
@@ -648,14 +671,9 @@ class Monitor:
 
             payload = json.dumps(self._state_payload())
 
-        # Publish heartbeat to status endpoint
-        MQTT.event.emit(
-            event_name="publish",
-            topic=f"{self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['status']}",
-            payload=f"{self._static_configuration['status']['online']}",
-            qos=1,
-            retain=True,
-        )
+        # The retained online status isn't sent with every report. MQTT sends
+        # it on every connect, and the Last Will replaces it with offline if
+        # this device drops off, so sending it again would change nothing.
 
         # Publish latest data to state endpoint
         MQTT.event.emit(
