@@ -27,17 +27,6 @@ DEFAULT_BATTERY_INTERNAL_RESISTANCE = 35.0
 DEFAULT_BATTERY_AVERAGE_READINGS = 6
 BATTERY_AVERAGE_READINGS_MAXIMUM = 100
 
-# The settings that can be changed over MQTT and are kept in the dynamic
-# configuration file: their type and default. The MonitorData attribute of the
-# same name holds the value in use.
-DYNAMIC_SETTINGS: dict[str, tuple[type[int] | type[float], int | float]] = {
-    "report_interval": (int, DEFAULT_REPORT_INTERVAL),
-    "battery_warning_threshold": (int, DEFAULT_BATTERY_WARNING_THRESHOLD),
-    "battery_voltage_minimum": (float, DEFAULT_BATTERY_VOLTAGE_MINIMUM),
-    "battery_voltage_maximum": (float, DEFAULT_BATTERY_VOLTAGE_MAXIMUM),
-    "battery_capacity": (int, DEFAULT_BATTERY_CAPACITY),
-}
-
 DEFAULT_INA_I2C_ADDRESS = 0x40  # Red Reactor Default I2C Address
 DEFAULT_INA_SHUNT_OHMS = 0.05  # Red Reactor Shunt Ohms
 DEFAULT_INA_MAX_EXPECTED_AMPS = 5.5
@@ -47,6 +36,21 @@ DEFAULT_INA_I2C_BUS = 1  # I2C bus the Red Reactor is connected to
 # a single 12-bit sample (532 us), 128 takes 68.1 ms per reading
 INA_ADC_SAMPLES = (1, 2, 4, 8, 16, 32, 64, 128)
 DEFAULT_INA_ADC_SAMPLES = 1
+
+# The settings that can be changed over MQTT and are kept in the dynamic
+# configuration file: their type and default. The MonitorData attribute of the
+# same name holds the value in use. The monitor interval and the readings
+# averaged default to their static configuration values instead.
+DYNAMIC_SETTINGS: dict[str, tuple[type[int] | type[float], int | float]] = {
+    "report_interval": (int, DEFAULT_REPORT_INTERVAL),
+    "battery_warning_threshold": (int, DEFAULT_BATTERY_WARNING_THRESHOLD),
+    "battery_voltage_minimum": (float, DEFAULT_BATTERY_VOLTAGE_MINIMUM),
+    "battery_voltage_maximum": (float, DEFAULT_BATTERY_VOLTAGE_MAXIMUM),
+    "battery_capacity": (int, DEFAULT_BATTERY_CAPACITY),
+    "monitor_interval": (float, DEFAULT_INA_MONITOR_INTERVAL),
+    "average_readings": (int, DEFAULT_BATTERY_AVERAGE_READINGS),
+    "shutdown_readings": (int, DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS),
+}
 
 # The log file lives on the SD card, so cap its size
 DEFAULT_LOG_MAX_BYTES = 1024 * 1024
@@ -80,3 +84,21 @@ HOURS_PER_DAY = 24
 COMMAND_PAYLOAD_MAXIMUM = 64
 # Seconds a shutdown or restart command may run before it is given up on
 SYSTEM_COMMAND_TIMEOUT = 60
+
+# INA219 reads in a row that must fail before the sensor is reported as having
+# a problem, and the readings are sent as unknown instead of the last good ones
+SENSOR_PROBLEM_READINGS = 3
+# Battery level change, in percentage points, that is reported straight away
+# instead of at the next report interval, 0 turns it off
+DEFAULT_BATTERY_REPORT_LEVEL_CHANGE = 5
+# Shortest time in seconds between reports sent for a change, so a charging
+# state that flickers around 0 mA doesn't send a report on every reading
+REPORT_ON_CHANGE_MINIMUM_INTERVAL = 10.0
+# Dynamic configuration key of the last shutdown or restart, and its reasons
+LAST_SHUTDOWN_KEY = "last_shutdown"
+SHUTDOWN_REASON_LOW_BATTERY = "Low battery"
+SHUTDOWN_REASON_SHUTDOWN_BUTTON = "Shutdown button"
+SHUTDOWN_REASON_RESTART_BUTTON = "Restart button"
+# Extra seconds, on top of two monitor intervals, a reading may take before the
+# systemd watchdog stops being told the service is healthy
+WATCHDOG_TICK_MARGIN = 30.0

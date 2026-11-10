@@ -16,6 +16,12 @@ StartLimitIntervalSec=60
 StartLimitBurst=5
 
 [Service]
+# The service tells systemd when it has started, and keeps pinging the
+# watchdog while the battery readings are being taken. If they stop, systemd
+# restarts it
+Type=notify
+NotifyAccess=main
+WatchdogSec=60
 WorkingDirectory=/var/lib/redreactor/
 User=redreactor
 ExecStart=/var/lib/redreactor/.venv/bin/python -m redreactor --config=/etc/redreactor/config.yaml --log=/etc/redreactor/redreactor.log
