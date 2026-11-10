@@ -24,13 +24,13 @@ def monitor(static_config, dynamic_config, mock_ina):
 
 
 @pytest.fixture
-def published(monitor):
+def published(monitor):  # noqa: ARG001 Built first, as it resets MQTT.event
     """Collect the state reports the monitor publishes."""
     from redreactor.components.mqtt import MQTT
 
     states: list[dict] = []
 
-    def record(topic, payload, **_):
+    def record(topic: str, payload: str, **_: object) -> None:
         if topic == STATE_TOPIC:
             states.append(json.loads(payload))
 
