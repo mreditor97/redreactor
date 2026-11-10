@@ -27,12 +27,14 @@ from redreactor.const import (
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
     DEFAULT_BATTERY_VOLTAGE_MINIMUM,
     DEFAULT_BATTERY_WARNING_THRESHOLD,
+    DEFAULT_INA_ADC_SAMPLES,
     DEFAULT_INA_I2C_ADDRESS,
     DEFAULT_INA_I2C_BUS,
     DEFAULT_INA_MAX_EXPECTED_AMPS,
     DEFAULT_INA_MONITOR_INTERVAL,
     DEFAULT_INA_SHUNT_OHMS,
     DEFAULT_REPORT_INTERVAL,
+    INA_ADC_SAMPLES,
     POWER_EVENT_TYPES,
 )
 from redreactor.helpers.emitter import EventEmitter
@@ -88,6 +90,7 @@ def _convert_quoted_values(configuration: dict[str, Any]) -> None:
         ("ina", "shunt_ohms"),
         ("ina", "max_expected_amps"),
         ("ina", "bus"),
+        ("ina", "adc_samples"),
         ("battery", "internal_resistance"),
         ("battery", "average_readings"),
     ):
@@ -226,19 +229,33 @@ def _validate_static(configuration: dict[str, Any]) -> list[str]:  # noqa: C901
     errors.extend(_validate_tls(mqtt["tls"]))
     errors.extend(_validate_battery_curve(configuration["battery"]["curve"]))
 
-    for path, value, minimum in (
-        (
-            "homeassistant.discovery_interval",
-            homeassistant["discovery_interval"],
-            DISCOVERY_INTERVAL_MINIMUM,
+    check(
+        "ina.monitor_interval",
+        _is_number(ina["monitor_interval"])
+        and MONITOR_INTERVAL_MINIMUM <= ina["monitor_interval"] <= INTERVAL_MAXIMUM,
+        f"must be a number of seconds from {MONITOR_INTERVAL_MINIMUM} to "
+        f"{INTERVAL_MAXIMUM}",
+    )
+    # 0 turns the repeated discovery off, it is still sent on connect and when
+    # Home Assistant comes online
+    discovery_interval = homeassistant["discovery_interval"]
+    check(
+        "homeassistant.discovery_interval",
+        _is_number(discovery_interval)
+        and (
+            discovery_interval == 0
+            or DISCOVERY_INTERVAL_MINIMUM <= discovery_interval <= INTERVAL_MAXIMUM
         ),
-        ("ina.monitor_interval", ina["monitor_interval"], MONITOR_INTERVAL_MINIMUM),
-    ):
-        check(
-            path,
-            _is_number(value) and minimum <= value <= INTERVAL_MAXIMUM,
-            f"must be a number of seconds from {minimum} to {INTERVAL_MAXIMUM}",
-        )
+        f"must be 0 (off) or a number of seconds from {DISCOVERY_INTERVAL_MINIMUM} "
+        f"to {INTERVAL_MAXIMUM}",
+    )
+    check(
+        "ina.adc_samples",
+        not isinstance(ina["adc_samples"], bool)
+        and isinstance(ina["adc_samples"], int)
+        and ina["adc_samples"] in INA_ADC_SAMPLES,
+        "must be one of " + ", ".join(str(n) for n in INA_ADC_SAMPLES),
+    )
 
     # Positive numbers
     for path, value in (
@@ -796,6 +813,9 @@ class LinkedConfiguration:
                 "shunt_ohms": DEFAULT_INA_SHUNT_OHMS,
                 "max_expected_amps": DEFAULT_INA_MAX_EXPECTED_AMPS,
                 "monitor_interval": DEFAULT_INA_MONITOR_INTERVAL,
+                # Samples the INA219 averages for each reading, 1 is a single
+                # 12-bit sample
+                "adc_samples": DEFAULT_INA_ADC_SAMPLES,
                 "bus": DEFAULT_INA_I2C_BUS,
             },
             "battery": {
