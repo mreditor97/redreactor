@@ -21,9 +21,8 @@ from redreactor.const import (
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
     DEFAULT_BATTERY_VOLTAGE_MINIMUM,
-    DEFAULT_BATTERY_WARNING_THRESHOLD,
-    DEFAULT_REPORT_INTERVAL,
     DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS,
+    DYNAMIC_SETTINGS,
     HOURS_PER_DAY,
     POWER_EVENT_LOW_BATTERY,
     POWER_EVENT_POWER_LOST,
@@ -40,6 +39,7 @@ from redreactor.helpers.cpu_utils import (
 )
 from redreactor.helpers.emitter import EventEmitter
 from redreactor.helpers.repeater import RepeatTimer
+from redreactor.helpers.topics import Topics, binary_payload
 
 if TYPE_CHECKING:
     from paho.mqtt.client import Client
@@ -74,6 +74,31 @@ def ina_adc_setting(samples: int) -> int:
     return INA_ADC_2SAMP + samples.bit_length() - 2
 
 
+def create_ina(ina_configuration: dict[str, Any]) -> INA219:
+    """Connect to the INA219 and set it up as the configuration says."""
+    ina = INA219(
+        shunt_ohms=ina_configuration["shunt_ohms"],
+        max_expected_amps=ina_configuration["max_expected_amps"],
+        address=ina_configuration["address"],
+        busnum=int(ina_configuration["bus"]),
+        log_level=logging.ERROR,
+    )
+    adc = ina_adc_setting(int(ina_configuration["adc_samples"]))
+    ina.configure(voltage_range=ina.RANGE_16V, bus_adc=adc, shunt_adc=adc)
+    return ina
+
+
+def published_current(current: float) -> float:
+    """Return the INA219 current (mA) the way it is published.
+
+    The INA219 reads the discharge current as positive. It is published the
+    other way round, negative while the battery is discharging and positive
+    while it is charging. Adding 0.0 turns -0.0 (a zero reading negated) into
+    0.0.
+    """
+    return round(-current, 4) + 0.0
+
+
 def read_once(static_configuration: dict[str, Any]) -> dict[str, Any]:
     """Read the Red Reactor once, without starting the monitoring service.
 
@@ -82,24 +107,14 @@ def read_once(static_configuration: dict[str, Any]) -> dict[str, Any]:
     """
     ina_configuration = static_configuration["ina"]
     try:
-        ina = INA219(
-            shunt_ohms=ina_configuration["shunt_ohms"],
-            max_expected_amps=ina_configuration["max_expected_amps"],
-            address=ina_configuration["address"],
-            busnum=int(ina_configuration["bus"]),
-            log_level=logging.ERROR,
-        )
-        adc = ina_adc_setting(int(ina_configuration["adc_samples"]))
-        ina.configure(voltage_range=ina.RANGE_16V, bus_adc=adc, shunt_adc=adc)
+        ina = create_ina(ina_configuration)
         voltage = ina.voltage()
         current = ina.current()
         return {
             "i2c_bus": int(ina_configuration["bus"]),
             "i2c_address": hex(ina_configuration["address"]),
             "voltage": round(voltage, 3),
-            # Published negative while discharging, positive while charging.
-            # Adding 0.0 turns -0.0 (a zero reading negated) into 0.0
-            "current": round(-current, 4) + 0.0,
+            "current": published_current(current),
             "power": round(abs(voltage * current) / 1000, 3),
             "charging": current < 0,
         }
@@ -163,21 +178,12 @@ class Monitor:
     ) -> None:
         """Initialise Monitor object."""
         self.event = EventEmitter()
-        self.data = MonitorData(
-            voltage=0.0,
-            current=0.0,
-            battery_level=100,
-            external_power=True,
-            cpu_temperature=0.0,
-            cpu_stat_raw=0,
-            cpu_stat_text="OK",
-            battery_warning_threshold=DEFAULT_BATTERY_WARNING_THRESHOLD,
-            battery_voltage_minimum=DEFAULT_BATTERY_VOLTAGE_MINIMUM,
-            battery_voltage_maximum=DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
-            report_interval=DEFAULT_REPORT_INTERVAL,
-        )
+        # The other values start at MonitorData's defaults, the settings are
+        # read from the dynamic configuration below
+        self.data = MonitorData(battery_level=100)
         self._static_configuration = static_configuration
         self._dynamic_configuration = dynamic_configuration
+        self._topics = Topics.from_configuration(static_configuration)
         self._battery_readings = deque(
             maxlen=int(
                 static_configuration.get("battery", {}).get(
@@ -223,15 +229,7 @@ class Monitor:
         # Setup the INA219
         ina: INA219 | None = None
         try:
-            ina = INA219(
-                shunt_ohms=static_configuration["ina"]["shunt_ohms"],
-                max_expected_amps=static_configuration["ina"]["max_expected_amps"],
-                address=static_configuration["ina"]["address"],
-                busnum=int(static_configuration["ina"]["bus"]),
-                log_level=logging.ERROR,
-            )
-            adc = ina_adc_setting(int(static_configuration["ina"]["adc_samples"]))
-            ina.configure(voltage_range=ina.RANGE_16V, bus_adc=adc, shunt_adc=adc)
+            ina = create_ina(static_configuration["ina"])
         except (OSError, ModuleNotFoundError):
             self.logger.exception("Unable to connect to the Red Reactor")
 
@@ -439,7 +437,7 @@ class Monitor:
 
         MQTT.event.emit(
             event_name="publish",
-            topic=f"{self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['event']}",
+            topic=self._topics.event,
             payload=json.dumps({"event_type": event_type}),
             qos=1,
             retain=False,
@@ -678,7 +676,7 @@ class Monitor:
         # Publish latest data to state endpoint
         MQTT.event.emit(
             event_name="publish",
-            topic=f"{self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['state']}",
+            topic=self._topics.state,
             payload=payload,
             # Retained so Home Assistant gets the latest readings as soon as
             # it subscribes, after discovery or its own restart, instead of
@@ -689,66 +687,32 @@ class Monitor:
 
     def _state_payload(self) -> dict[str, Any]:
         """Return the state message, keyed by each field's configured name."""
-        return {
-            f"{self._static_configuration['fields']['voltage']['name']}": round(
-                self.data.voltage,
-                3,
+        fields = self._static_configuration["fields"]
+        values: dict[str, Any] = {
+            "voltage": round(self.data.voltage, 3),
+            "current": published_current(self.data.current),
+            "power": round(self.data.power, 3),
+            "battery_level": self.data.battery_level,
+            "external_power": binary_payload(
+                fields["external_power"],
+                self.data.external_power,
             ),
-            # The INA219 reads the discharge current as positive. It is
-            # published the other way round, negative while the battery
-            # is discharging and positive while it is charging.
-            # Adding 0.0 turns -0.0 (a zero reading negated) into 0.0
-            f"{self._static_configuration['fields']['current']['name']}": round(
-                -self.data.current,
-                4,
-            )
-            + 0.0,
-            f"{self._static_configuration['fields']['power']['name']}": round(
-                self.data.power,
-                3,
-            ),
-            f"{self._static_configuration['fields']['battery_level']['name']}": self.data.battery_level,  # noqa: E501
-            f"{self._static_configuration['fields']['external_power']['name']}": (  # noqa: E501
-                self._static_configuration["fields"][  # noqa: E501
-                    "external_power"
-                ].get(
-                    "payload_on",
-                    "ON",
-                )
-                if self.data.external_power
-                else self._static_configuration["fields"]["external_power"].get(
-                    "payload_off",
-                    "OFF",
-                )
-            ),
-            f"{self._static_configuration['fields']['charging']['name']}": (
-                self._static_configuration["fields"]["charging"].get(
-                    "payload_on",
-                    "ON",
-                )
-                if self.data.charging
-                else self._static_configuration["fields"]["charging"].get(
-                    "payload_off",
-                    "OFF",
-                )
-            ),
-            f"{self._static_configuration['fields']['cpu_temperature']['name']}": self.data.cpu_temperature,  # noqa: E501
-            f"{self._static_configuration['fields']['under_voltage']['name']}": self._cpu_stat_payload(  # noqa: E501
+            "charging": binary_payload(fields["charging"], self.data.charging),
+            "cpu_temperature": self.data.cpu_temperature,
+            "under_voltage": self._cpu_stat_payload(
                 "under_voltage",
                 UNDER_VOLTAGE_MASK,
             ),
-            f"{self._static_configuration['fields']['throttled']['name']}": self._cpu_stat_payload(  # noqa: E501
-                "throttled",
-                THROTTLED_MASK,
-            ),
-            f"{self._static_configuration['fields']['cpu_stat_text']['name']}": self.data.cpu_stat_text,  # noqa: E501
-            f"{self._static_configuration['fields']['battery_warning_threshold']['name']}": self.data.battery_warning_threshold,  # noqa: E501
-            f"{self._static_configuration['fields']['battery_voltage_minimum']['name']}": self.data.battery_voltage_minimum,  # noqa: E501
-            f"{self._static_configuration['fields']['battery_voltage_maximum']['name']}": self.data.battery_voltage_maximum,  # noqa: E501
-            f"{self._static_configuration['fields']['report_interval']['name']}": self.data.report_interval,  # noqa: E501
-            f"{self._static_configuration['fields']['battery_capacity']['name']}": self.data.battery_capacity,  # noqa: E501
-            f"{self._static_configuration['fields']['battery_time_remaining']['name']}": self.data.battery_time_remaining,  # noqa: E501
+            "throttled": self._cpu_stat_payload("throttled", THROTTLED_MASK),
+            "cpu_stat_text": self.data.cpu_stat_text,
+            "battery_warning_threshold": self.data.battery_warning_threshold,
+            "battery_voltage_minimum": self.data.battery_voltage_minimum,
+            "battery_voltage_maximum": self.data.battery_voltage_maximum,
+            "report_interval": self.data.report_interval,
+            "battery_capacity": self.data.battery_capacity,
+            "battery_time_remaining": self.data.battery_time_remaining,
         }
+        return {str(fields[key]["name"]): value for key, value in values.items()}
 
     def _cpu_stat_payload(self, field: str, mask: int) -> str | None:
         """Return a binary sensor payload for bits of the throttling bitmask.
@@ -758,10 +722,10 @@ class Monitor:
         if self.data.cpu_stat_raw is None:
             return None
 
-        field_configuration = self._static_configuration["fields"][field]
-        if self.data.cpu_stat_raw & mask:
-            return str(field_configuration.get("payload_on", "ON"))
-        return str(field_configuration.get("payload_off", "OFF"))
+        return binary_payload(
+            self._static_configuration["fields"][field],
+            bool(self.data.cpu_stat_raw & mask),
+        )
 
     def _update_dynamic_configuration(self) -> None:
         """Update Dynamic Configuration.
@@ -770,30 +734,8 @@ class Monitor:
         The dynamic configuration is keyed by field key, not by the configurable
         field name used for MQTT topics and payloads.
         """
-        # Update Battery Warning Threshold
-        self.data.battery_warning_threshold = int(
-            self._dynamic_configuration.data["battery_warning_threshold"],
-        )
-
-        # Update Battery Voltage Minimum
-        self.data.battery_voltage_minimum = float(
-            self._dynamic_configuration.data["battery_voltage_minimum"],
-        )
-
-        # Update Battery Voltage Maximum
-        self.data.battery_voltage_maximum = float(
-            self._dynamic_configuration.data["battery_voltage_maximum"],
-        )
-
-        # Update Report Interval
-        self.data.report_interval = int(
-            self._dynamic_configuration.data["report_interval"],
-        )
-
-        # Update Battery Capacity
-        self.data.battery_capacity = int(
-            self._dynamic_configuration.data["battery_capacity"],
-        )
+        for key, (kind, _) in DYNAMIC_SETTINGS.items():
+            setattr(self.data, key, kind(self._dynamic_configuration.data[key]))
 
         if self.report_timer:
             # Apply the new report interval straight away, rather than after

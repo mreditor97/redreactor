@@ -23,6 +23,7 @@ from redreactor.const import (
     SYSTEM_COMMAND_TIMEOUT,
 )
 from redreactor.helpers.emitter import EventEmitter
+from redreactor.helpers.topics import Topics
 
 if TYPE_CHECKING:
     from paho.mqtt.client import Client, MQTTMessage
@@ -53,6 +54,14 @@ class Commander:
         self._static_configuration = static_configuration
         self._dynamic_configuration = dynamic_configuration
         self._monitor = monitor
+        self._topics = Topics.from_configuration(static_configuration)
+        # The button and number fields, by the name they are commanded with.
+        # Built once, so a message is routed with one lookup
+        self._commands: dict[str, str] = {
+            str(field["name"]): key
+            for key, field in static_configuration["fields"].items()
+            if field["type"] in {"number", "button"}
+        }
         # Held from the first shutdown or restart until the program exits, so
         # a repeated low battery reading or button press doesn't run it twice
         self._command_lock = threading.Lock()
@@ -75,26 +84,14 @@ class Commander:
         _properties: Any = None,
     ) -> None:
         """Process Commander subscriptions on MQTT connect event."""
-        # Loop through all available field options
-        for field in self._static_configuration["fields"]:
-            # Only process fields that are of type button or number
-            if self._static_configuration["fields"][field]["type"] in {
-                "number",
-                "button",
-            }:
-                self.logger.info(
-                    "Subscribing to the %s topic at: %s/%s/%s/%s",
-                    self._static_configuration["fields"][field]["pretty"],
-                    self._static_configuration["mqtt"]["base_topic"],
-                    self._static_configuration["hostname"]["name"],
-                    self._static_configuration["mqtt"]["topic"]["set"],
-                    self._static_configuration["fields"][field]["name"],
-                )
-
-                # Subscribe to that specific topic
-                client.subscribe(
-                    topic=f"{self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['set']}/{self._static_configuration['fields'][field]['name']}",
-                )
+        for name, key in self._commands.items():
+            topic = self._topics.command(name)
+            self.logger.info(
+                "Subscribing to the %s topic at: %s",
+                self._static_configuration["fields"][key]["pretty"],
+                topic,
+            )
+            client.subscribe(topic=topic)
 
     def _on_message(
         self,
@@ -103,14 +100,7 @@ class Commander:
         message: MQTTMessage,
     ) -> None:
         """Process Commander messages on MQTT message event."""
-        prefix = "/".join(
-            (
-                self._static_configuration["mqtt"]["base_topic"],
-                self._static_configuration["hostname"]["name"],
-                self._static_configuration["mqtt"]["topic"]["set"],
-                "",
-            ),
-        )
+        prefix = self._topics.set_prefix
 
         # Other components subscribe to their own topics, which are not
         # commands for us
@@ -143,50 +133,41 @@ class Commander:
             )
             return
 
-        # Loop through available fields to find the expected command topic
-        for field in self._static_configuration["fields"]:
-            # If the received command is of type button
-            if (
-                self._static_configuration["fields"][field]["type"] == "button"
-                and topic == self._static_configuration["fields"][field]["name"]
-            ):
-                self.logger.info(
-                    "%s button has been pressed",
-                    self._static_configuration["fields"][field]["pretty"],
-                )
-                # Run off the MQTT network thread: publishes made from inside a
-                # paho callback are only queued, and sleeping here would block
-                # the loop that has to deliver the offline status.
-                threading.Thread(
-                    target=self._on_command,
-                    kwargs={"event_type": field},
-                    name=f"redreactor-{field}",
-                ).start()
-                return
+        field = self._commands.get(topic)
+        if field is None:
+            self.logger.warning("Command received on %s is invalid", topic)
+            return
 
-            # If the received command is of type number
-            if (
-                self._static_configuration["fields"][field]["type"] == "number"
-                and topic == self._static_configuration["fields"][field]["name"]
-            ):
-                self.logger.info(
-                    "%s update command received, changing to value %s",
-                    self._static_configuration["fields"][field]["pretty"],
-                    command,
-                )
+        field_configuration = self._static_configuration["fields"][field]
+        if field_configuration["type"] == "button":
+            self.logger.info(
+                "%s button has been pressed",
+                field_configuration["pretty"],
+            )
+            # Run off the MQTT network thread: publishes made from inside a
+            # paho callback are only queued, and sleeping here would block
+            # the loop that has to deliver the offline status.
+            threading.Thread(
+                target=self._on_command,
+                kwargs={"event_type": field},
+                name=f"redreactor-{field}",
+            ).start()
+            return
 
-                if not self._is_valid_number(field, command):
-                    return
+        self.logger.info(
+            "%s update command received, changing to value %s",
+            field_configuration["pretty"],
+            command,
+        )
 
-                # Update Dynamic configuration with latest value
-                self._dynamic_configuration.data[field] = command
+        if not self._is_valid_number(field, command):
+            return
 
-                # Dynamic configuration has changed, call write event
-                self._dynamic_configuration.event.emit("write")
-                return
+        # Update Dynamic configuration with latest value
+        self._dynamic_configuration.data[field] = command
 
-        # If it gets to here, the received command is invalid
-        self.logger.warning("Command received on %s is invalid", topic)
+        # Dynamic configuration has changed, call write event
+        self._dynamic_configuration.event.emit("write")
 
     def _is_valid_number(self, field: str, value: Any) -> bool:
         """Check a received number command before it is persisted.
@@ -288,7 +269,7 @@ class Commander:
         # Publish to MQTT the offline state, before shutting down or restarting
         MQTT.event.emit(
             event_name="publish",
-            topic=f"{self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['status']}",
+            topic=self._topics.status,
             payload=f"{self._static_configuration['status']['offline']}",
             qos=1,
             retain=True,

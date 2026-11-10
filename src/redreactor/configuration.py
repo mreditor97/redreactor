@@ -21,19 +21,17 @@ import yaml
 from redreactor.const import (
     BATTERY_AVERAGE_READINGS_MAXIMUM,
     DEFAULT_BATTERY_AVERAGE_READINGS,
-    DEFAULT_BATTERY_CAPACITY,
     DEFAULT_BATTERY_INTERNAL_RESISTANCE,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
     DEFAULT_BATTERY_VOLTAGE_MINIMUM,
-    DEFAULT_BATTERY_WARNING_THRESHOLD,
     DEFAULT_INA_ADC_SAMPLES,
     DEFAULT_INA_I2C_ADDRESS,
     DEFAULT_INA_I2C_BUS,
     DEFAULT_INA_MAX_EXPECTED_AMPS,
     DEFAULT_INA_MONITOR_INTERVAL,
     DEFAULT_INA_SHUNT_OHMS,
-    DEFAULT_REPORT_INTERVAL,
+    DYNAMIC_SETTINGS,
     INA_ADC_SAMPLES,
     POWER_EVENT_TYPES,
 )
@@ -454,12 +452,8 @@ class DynamicConfiguration:
 
     def _load(self) -> Any:
         """Load dynamic configuration file."""
-        dynamic_file_defaults = {
-            "report_interval": DEFAULT_REPORT_INTERVAL,
-            "battery_warning_threshold": DEFAULT_BATTERY_WARNING_THRESHOLD,
-            "battery_voltage_minimum": DEFAULT_BATTERY_VOLTAGE_MINIMUM,
-            "battery_voltage_maximum": DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
-            "battery_capacity": DEFAULT_BATTERY_CAPACITY,
+        dynamic_file_defaults: dict[str, Any] = {
+            key: default for key, (_, default) in DYNAMIC_SETTINGS.items()
         }
 
         dynamic_path = Path(self._dynamic_file)

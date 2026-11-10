@@ -16,6 +16,7 @@ from redreactor.const import (
     HOMEASSISTANT_ONLINE_STATE_DELAY,
 )
 from redreactor.helpers.repeater import RepeatTimer
+from redreactor.helpers.topics import DEFAULT_PAYLOAD_OFF, DEFAULT_PAYLOAD_ON, Topics
 
 from .binary_sensor import BinarySensor
 from .button import Button
@@ -25,6 +26,8 @@ from .number import Number
 from .sensor import Sensor
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from paho.mqtt.client import Client, MQTTMessage
 
     from redreactor.configuration import DynamicConfiguration
@@ -64,12 +67,76 @@ def _slugify(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
 
 
+def _sensor_options(field: dict[str, Any], _topics: Topics) -> dict[str, Any]:
+    return {
+        "unit_of_measurement": field.get("unit"),
+        "suggested_display_precision": field.get("suggested_display_precision"),
+        "state_class": field.get("state_class", "measurement"),
+    }
+
+
+def _binary_sensor_options(field: dict[str, Any], _topics: Topics) -> dict[str, Any]:
+    return {
+        "payload_on": field.get("payload_on", DEFAULT_PAYLOAD_ON),
+        "payload_off": field.get("payload_off", DEFAULT_PAYLOAD_OFF),
+    }
+
+
+def _command_options(field: dict[str, Any], topics: Topics) -> dict[str, Any]:
+    """Options of the entities Home Assistant sends commands from."""
+    return {
+        "command_topic": topics.command(str(field["name"])),
+        "command_template": "{{ value }}",
+    }
+
+
+def _number_options(field: dict[str, Any], topics: Topics) -> dict[str, Any]:
+    return _command_options(field, topics) | {
+        "min": field.get("min", 0),
+        "max": field.get("max", 300),
+        "mode": field.get("mode", "auto"),
+        "step": field.get("step", 0.5),
+        "optimistic": field.get("optimistic"),
+        "unit_of_measurement": field.get("unit"),
+    }
+
+
+def _button_options(field: dict[str, Any], topics: Topics) -> dict[str, Any]:
+    return _command_options(field, topics) | {
+        "payload_press": field.get("payload_press", json.dumps(True)),  # noqa: FBT003
+    }
+
+
+def _event_options(field: dict[str, Any], topics: Topics) -> dict[str, Any]:
+    # Events have their own topic and payload, the JSON event is read as it
+    # is, and they never expire
+    return {
+        "event_types": list(field.get("event_types", [])),
+        "state_topic": topics.event,
+        "value_template": field.get("value_template"),
+        "expire_after": None,
+    }
+
+
+# The entity class and its own options, for each field type
+ENTITY_BUILDERS: dict[
+    str,
+    tuple[type[Base], Callable[[dict[str, Any], Topics], dict[str, Any]]],
+] = {
+    "sensor": (Sensor, _sensor_options),
+    "binary_sensor": (BinarySensor, _binary_sensor_options),
+    "number": (Number, _number_options),
+    "button": (Button, _button_options),
+    "event": (Event, _event_options),
+}
+
+
 class Homeassistant:
     """Home Assistant integration."""
 
     logger = logging.getLogger("Red Reactor")
 
-    configuration: list[Sensor | Number | BinarySensor | Button | Event]
+    configuration: list[Base]
 
     # Shared by every entity, sent once at the top of the device discovery
     _device: Device
@@ -137,105 +204,54 @@ class Homeassistant:
             sw_version=version("redreactor"),
         )
         self._device = configuration_defaults
-        mqtt_configuration = static_configuration["mqtt"]
-        topics = mqtt_configuration["topic"]
-        hostname = static_configuration["hostname"]["name"]
-        device_topic = f"{mqtt_configuration['base_topic']}/{hostname}"
-        self._state_topic = f"{device_topic}/{topics['state']}"
+        topics = Topics.from_configuration(static_configuration)
+        self._topics = topics
+        self._state_topic = topics.state
         self._availability = [
             Availability(
-                topic=f"{device_topic}/{topics['status']}",
+                topic=topics.status,
                 payload_available=f"{static_configuration['status']['online']}",
                 payload_not_available=f"{static_configuration['status']['offline']}",
             ),
         ]
 
-        for field_key in static_configuration["fields"]:
-            field = static_configuration["fields"][field_key]
-
-            configuring: Base = Base(
-                name=f"{field.get('pretty')}",
-                device_class=field.get("device_class", None),
-                expire_after=self._expire_after,
-                entity_category=field.get("entity_category", None),
-                icon=field.get("icon", None),
-                default_entity_id=self._default_entity_id(
+        device_id = _discovery_id(str(configuration_defaults.identifiers))
+        homeassistant_topic = static_configuration["homeassistant"]["topic"]
+        for field in static_configuration["fields"].values():
+            entity_type = str(field["type"])
+            common: dict[str, Any] = {
+                "name": f"{field.get('pretty')}",
+                "device_class": field.get("device_class"),
+                "expire_after": self._expire_after,
+                "entity_category": field.get("entity_category"),
+                "icon": field.get("icon"),
+                "default_entity_id": self._default_entity_id(
                     field,
                     str(configuration_defaults.name),
                 ),
-                unique_id=f"{configuration_defaults.identifiers}_{field['name']}",
+                "unique_id": f"{configuration_defaults.identifiers}_{field['name']}",
                 # The legacy per-entity discovery topic, only used to migrate
                 # Home Assistant to the device discovery that replaces it
-                configuration_topic=f"{static_configuration['homeassistant']['topic']}/{field['type']}/{_discovery_id(str(configuration_defaults.identifiers))}_{field['name']}/config",
-                availability_mode=f"{field.get('availability_mode', 'all')}",
-                value_template=field.get(
-                    "value_template",
-                    f"{ '{{ value_json.' + str(field['name']) + ' }}' }",
+                "configuration_topic": (
+                    f"{homeassistant_topic}/{entity_type}/"
+                    f"{device_id}_{field['name']}/config"
                 ),
-                enabled_by_default=field.get("enabled_by_default", True),
+                "availability_mode": f"{field.get('availability_mode', 'all')}",
+                "value_template": field.get(
+                    "value_template",
+                    "{{ value_json." + str(field["name"]) + " }}",
+                ),
+                "enabled_by_default": field.get("enabled_by_default", True),
+                # Not part of the entity's own configuration, they place it in
+                # the device discovery message
+                "platform": entity_type,
+                "component_id": str(field["name"]),
+            }
+            entity_class, options = ENTITY_BUILDERS[entity_type]
+            # The type's own options win, such as the event's own topic
+            self.configuration.append(
+                entity_class(**(common | options(field, topics))),
             )
-
-            configured: Sensor | BinarySensor | Number | Button | Event = Sensor()
-            if field["type"] == "sensor":
-                configured = Sensor(
-                    unit_of_measurement=field.get("unit", None),
-                    suggested_display_precision=field.get(
-                        "suggested_display_precision",
-                        None,
-                    ),
-                    state_class=field.get("state_class", "measurement"),
-                )
-
-            if field["type"] == "binary_sensor":
-                configured = BinarySensor(
-                    payload_on=field.get("payload_on", "ON"),
-                    payload_off=field.get("payload_off", "OFF"),
-                )
-
-            if field["type"] == "number":
-                configured = Number(
-                    command_topic=f"{static_configuration['mqtt']['base_topic']}/{static_configuration['hostname']['name']}/{static_configuration['mqtt']['topic']['set']}/{field['name']}",
-                    command_template=f"{ '{{ value }}' }",
-                    min=field.get("min", 0),
-                    max=field.get("max", 300),
-                    mode=field.get("mode", "auto"),
-                    step=field.get("step", 0.5),
-                    optimistic=field.get("optimistic", None),
-                    unit_of_measurement=field.get("unit", None),
-                )
-
-            if field["type"] == "event":
-                configured = Event(
-                    event_types=list(field.get("event_types", [])),
-                )
-                # Events have their own topic and payload, the JSON event is
-                # read as it is, and they never expire
-                configuring.state_topic = f"{device_topic}/{topics['event']}"
-                configuring.value_template = field.get("value_template")
-                configuring.expire_after = None
-
-            if field["type"] == "button":
-                configured = Button(
-                    command_topic=f"{static_configuration['mqtt']['base_topic']}/{static_configuration['hostname']['name']}/{static_configuration['mqtt']['topic']['set']}/{field['name']}",
-                    command_template=f"{ '{{ value }}' }",
-                    payload_press=field.get(
-                        "payload_press",
-                        json.dumps(True),  # noqa: FBT003
-                    ),
-                )
-
-            # Overlay the shared Base fields onto the type-specific object.
-            # `configuring` (Base) wins on any key present in both, which is
-            # intentional — Base carries the authoritative common attributes
-            # such as unique_id, state_topic, and availability.
-            configured.__dict__ |= configuring.__dict__
-
-            # Not part of the entity's own configuration, they place it in the
-            # device discovery message
-            configured.platform = str(field["type"])
-            configured.component_id = str(field["name"])
-
-            self.configuration.append(configured)
 
     def _effective_expire_after(self) -> int:
         """Return the expire after time sent to Home Assistant, in seconds.
@@ -322,8 +338,8 @@ class Homeassistant:
         for field in self.configuration:
             component = {
                 k: v
-                for (k, v) in field.__dict__.items()
-                if v is not None and k not in COMPONENT_EXCLUDED_KEYS
+                for (k, v) in field.as_dict().items()
+                if k not in COMPONENT_EXCLUDED_KEYS
             }
             if component.get("state_topic") == self._state_topic:
                 del component["state_topic"]

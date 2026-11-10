@@ -2,168 +2,86 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, fields
 from json import JSONEncoder
 from typing import Any
 
 
-# Home Assistant MQTT Representer object
-# Enabled the printing into a dict and to JSON
+@dataclass(kw_only=True, repr=False)
 class Representer:
-    """Representer.
+    """A Home Assistant MQTT discovery object.
 
-    Enables printing into a dict and to JSON.
+    Values left as None are not part of the discovery message, as Home
+    Assistant rejects discovery payloads with null fields.
     """
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return the values that are set, by their discovery name."""
+        return {
+            field.name: value
+            for field in fields(self)
+            if (value := getattr(self, field.name)) is not None
+        }
 
     def __repr__(self) -> str:
-        """Return Represent."""
-        return repr({k: v for (k, v) in self.__dict__.items() if v is not None})
+        """Return the values that are set."""
+        return repr(self.as_dict())
 
 
-# Home Assistant MQTT JSON Encoder
-# Allows the conversion of the Home Assistant objects to JSON
 class Encoder(JSONEncoder):
-    """Encoder.
-
-    Allows the conversion of the Home Assistant object into JSON.
-    """
+    """Encode the Home Assistant discovery objects into JSON."""
 
     def default(self, o: Any) -> Any:
         """Encode object into JSON."""
-        if isinstance(o, Device | Availability):
-            return {k: v for (k, v) in o.__dict__.items() if v is not None}
+        if isinstance(o, Representer):
+            return o.as_dict()
 
         return JSONEncoder.default(self, o)
 
 
-# Home Assistant MQTT Availability topic
-# Topic to subscribe to receive availability updates
+@dataclass(kw_only=True, repr=False)
 class Availability(Representer):
-    """Availability.
-
-    Adds Home Assistant MQTT Availability support.
-    """
+    """Topic Home Assistant reads the device's availability from."""
 
     topic: str
-    payload_available: str | None
-    payload_not_available: str | None
-
-    def __init__(
-        self,
-        topic: str,
-        payload_available: str | None = None,
-        payload_not_available: str | None = None,
-    ) -> None:
-        """Initialise Home Assistant Availability object."""
-        self.payload_available = payload_available
-        self.payload_not_available = payload_not_available
-        self.topic = topic
+    payload_available: str | None = None
+    payload_not_available: str | None = None
 
 
-# Home Assistant MQTT Device
-# Ties the device into the device registry within Home Assistant
+@dataclass(kw_only=True, repr=False)
 class Device(Representer):
-    """Device.
+    """Ties the entities to one device in Home Assistant's device registry."""
 
-    Adds support for Home Assistant device list.
-    """
-
-    configuration_url: str | None
-    connections: list[list[str]] | None  # [connection_type, connection_identifier]
-    hw_version: str | None
-    identifiers: str | list[str] | None
-    manufacturer: str | None
-    model: str | None
-    name: str | None
-    suggested_area: str | None
-    sw_version: str | None
-    via_device: str | None
-
-    def __init__(  # noqa: PLR0913, PLR0917
-        self,
-        configuration_url: str | None = None,
-        connections: list[list[str]] | None = None,
-        hw_version: str | None = None,
-        identifiers: str | list[str] | None = None,
-        manufacturer: str | None = None,
-        model: str | None = None,
-        name: str | None = None,
-        suggested_area: str | None = None,
-        sw_version: str | None = None,
-        via_device: str | None = None,
-    ) -> None:
-        """Initialise Home Assistant Device object."""
-        self.configuration_url = configuration_url
-        self.connections = connections
-        self.hw_version = hw_version
-        self.identifiers = identifiers
-        self.manufacturer = manufacturer
-        self.model = model
-        self.name = name
-        self.suggested_area = suggested_area
-        self.sw_version = sw_version
-        self.via_device = via_device
+    configuration_url: str | None = None
+    connections: list[list[str]] | None = None  # [connection_type, identifier]
+    hw_version: str | None = None
+    identifiers: str | list[str] | None = None
+    manufacturer: str | None = None
+    model: str | None = None
+    name: str | None = None
+    suggested_area: str | None = None
+    sw_version: str | None = None
+    via_device: str | None = None
 
 
-# Home Assistant MQTT Items
-# Standard options available on all MQTT inputs
+@dataclass(kw_only=True, repr=False)
 class Base(Representer):
-    """Base.
+    """Options every Home Assistant MQTT entity type has."""
 
-    In all Home Assistant device types.
-    """
+    name: str | None = None
+    device_class: str | None = None
+    entity_category: str | None = None
+    expire_after: int | None = None  # Seconds until the state is unavailable
+    icon: str | None = None
+    default_entity_id: str | None = None
+    unique_id: str | None = None
+    state_topic: str | None = None
+    value_template: str | None = None
+    availability: list[Availability] | None = None
+    availability_mode: str | None = None
+    device: Device | None = None
+    enabled_by_default: bool | None = None
 
-    name: str | None
-    device_class: str | None
-    entity_category: str | None
-    expire_after: int | None  # Number of seconds after state becomes unavailable
-    icon: str | None
-    default_entity_id: str | None
-    unique_id: str | None
-    state_topic: str | None
-    value_template: str | None
-    availability: list[Availability] | None
-    availability_mode: str | None
-    device: Device | None
-    enabled_by_default: bool | None
-
-    configuration_topic: str | None  # The legacy per-entity discovery topic
-    platform: str | None  # The entity type in the device discovery message
-    component_id: str | None  # The entity's key in the device discovery message
-
-    def __init__(  # noqa: PLR0913, PLR0917
-        self,
-        name: str | None = None,
-        device_class: str | None = None,
-        entity_category: str | None = None,
-        expire_after: int | None = None,
-        icon: str | None = None,
-        default_entity_id: str | None = None,
-        unique_id: str | None = None,
-        state_topic: str | None = None,
-        value_template: str | None = None,
-        availability: list[Availability] | None = None,
-        availability_mode: str | None = None,
-        device: Device | None = None,
-        enabled_by_default: bool | None = None,
-        configuration_topic: str | None = None,
-        platform: str | None = None,
-        component_id: str | None = None,
-    ) -> None:
-        """Initialise Home Assistant Base object."""
-        self.name = name
-        self.device_class = device_class
-        self.entity_category = entity_category
-        self.expire_after = expire_after
-        self.icon = icon
-        self.default_entity_id = default_entity_id
-        self.unique_id = unique_id
-        self.state_topic = state_topic
-        self.value_template = value_template
-        self.availability = availability
-        self.availability_mode = availability_mode
-        self.device = device
-        self.enabled_by_default = enabled_by_default
-
-        self.configuration_topic = configuration_topic
-        self.platform = platform
-        self.component_id = component_id
+    configuration_topic: str | None = None  # The legacy per-entity topic
+    platform: str | None = None  # The entity type in the device discovery
+    component_id: str | None = None  # The entity's key in the device discovery
