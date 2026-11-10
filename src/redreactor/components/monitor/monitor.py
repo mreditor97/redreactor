@@ -10,8 +10,6 @@ from itertools import pairwise
 from threading import Lock, RLock
 from typing import TYPE_CHECKING, Any
 
-from ina219 import INA219, DeviceRangeError
-
 from redreactor.components.monitor.data import MonitorData
 from redreactor.components.mqtt import MQTT
 from redreactor.const import (
@@ -38,6 +36,7 @@ from redreactor.helpers.cpu_utils import (
     read_cpu_temperature,
 )
 from redreactor.helpers.emitter import EventEmitter
+from redreactor.helpers.ina219 import INA219, DeviceRangeError
 from redreactor.helpers.repeater import RepeatTimer
 from redreactor.helpers.topics import Topics, binary_payload
 
@@ -57,14 +56,14 @@ THROTTLED_MASK = (
 )
 
 
-# pi-ina219's ADC settings, the values of the INA219 configuration register's
-# bus and shunt ADC fields
+# INA219 ADC settings, the values of the configuration register's bus and
+# shunt ADC fields (INA219.ADC_12BIT and INA219.ADC_2SAMP)
 INA_ADC_12BIT = 3
 INA_ADC_2SAMP = 9
 
 
 def ina_adc_setting(samples: int) -> int:
-    """Return the pi-ina219 ADC setting that averages this many samples.
+    """Return the INA219 ADC setting that averages this many samples.
 
     1 is the library's single 12-bit sample (ADC_12BIT = 3). Averaging 2 to
     128 samples are ADC_2SAMP (9) to ADC_128SAMP (15), one step per doubling.
@@ -284,7 +283,7 @@ class Monitor:
                     self.data.voltage,
                     self.data.current,
                 )
-                # Worked out here rather than read from the INA219, whose
+                # Worked out here rather than read from the INA219, as
                 # power() reads the overflow flag and the power register, two
                 # more I2C reads for what the chip calculates the same way.
                 # Volts x milliamps / 1000 is watts, always positive like the
