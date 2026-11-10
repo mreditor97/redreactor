@@ -168,6 +168,7 @@ class Monitor:
             ),
         )
         self._has_reading = False
+        self._read_failures = 0
         self._report_pending = False
         self._shutdown_emitted = False
         self._stopped = False
@@ -272,7 +273,26 @@ class Monitor:
                     self.data.battery_voltage_minimum,
                     self.data.battery_voltage_maximum,
                 )
+            except OSError as error:
+                # An I2C read can fail with a loose connection or a busy bus.
+                # Skip this reading, rather than making a decision on stale
+                # values, and try again on the next tick. Logged once until a
+                # read works again, so a lasting fault doesn't flood the log.
+                self._read_failures += 1
+                if self._read_failures == 1:
+                    self.logger.error(  # noqa: TRY400
+                        "Unable to read the Red Reactor (%s), retrying every %ss",
+                        error,
+                        self._static_configuration["ina"]["monitor_interval"],
+                    )
+                return
             else:
+                if self._read_failures:
+                    self.logger.warning(
+                        "Reading the Red Reactor again, after %i failed readings",
+                        self._read_failures,
+                    )
+                    self._read_failures = 0
                 # INA219 current sign convention on the Red Reactor:
                 #   > 10 mA  -- discharging (no external power)
                 #   0-10 mA  -- float charge (battery full, power present)

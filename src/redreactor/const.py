@@ -56,3 +56,8 @@ POWER_EVENT_TYPES = (
 HOMEASSISTANT_MIGRATION_DELAY = 1.0
 # Hours in a day, the battery time remaining is published in days
 HOURS_PER_DAY = 24
+
+# Largest MQTT command payload accepted, a setting is a single number
+COMMAND_PAYLOAD_MAXIMUM = 64
+# Seconds a shutdown or restart command may run before it is given up on
+SYSTEM_COMMAND_TIMEOUT = 60

@@ -41,6 +41,16 @@ REMOVED_ENTITIES = (
 COMPONENT_EXCLUDED_KEYS = frozenset({"configuration_topic", "device", "component_id"})
 
 
+def _discovery_id(text: str) -> str:
+    """Make text safe for a discovery topic level.
+
+    Home Assistant ignores a discovery topic whose node or object ID has any
+    character other than letters, digits, _ and -, so a hostname such as
+    `pi.local` or `my pi` would never be discovered.
+    """
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", text)
+
+
 def _slugify(text: str) -> str:
     """Turn text into the lower case letters, digits and _ of an entity ID."""
     return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
@@ -77,6 +87,8 @@ class Homeassistant:
         self.configuration = []
         self._migrated = False
         self._migration_lock = threading.Lock()
+        self._online_lock = threading.Lock()
+        self._online_timer: threading.Timer | None = None
 
         self._process_homeassistant_configuration(static_configuration)
 
@@ -132,7 +144,7 @@ class Homeassistant:
                 unique_id=f"{configuration_defaults.identifiers}_{field['name']}",
                 # The legacy per-entity discovery topic, only used to migrate
                 # Home Assistant to the device discovery that replaces it
-                configuration_topic=f"{static_configuration['homeassistant']['topic']}/{field['type']}/{configuration_defaults.identifiers}_{field['name']}/config",
+                configuration_topic=f"{static_configuration['homeassistant']['topic']}/{field['type']}/{_discovery_id(str(configuration_defaults.identifiers))}_{field['name']}/config",
                 availability_mode=f"{field.get('availability_mode', 'all')}",
                 value_template=field.get(
                     "value_template",
@@ -235,7 +247,8 @@ class Homeassistant:
     def _device_discovery_topic(self) -> str:
         """Topic for the single device discovery message holding every entity."""
         homeassistant_topic = self._static_configuration["homeassistant"]["topic"]
-        return f"{homeassistant_topic}/device/{self._device.identifiers}/config"
+        device_id = _discovery_id(str(self._device.identifiers))
+        return f"{homeassistant_topic}/device/{device_id}/config"
 
     def _device_discovery_payload(self) -> dict[str, Any]:
         """Build the device discovery payload.
@@ -342,7 +355,7 @@ class Homeassistant:
         """Old discovery topics of entities that are no longer published."""
         homeassistant_topic = self._static_configuration["homeassistant"]["topic"]
         return [
-            f"{homeassistant_topic}/{entity_type}/{self._device.identifiers}_{name}/config"
+            f"{homeassistant_topic}/{entity_type}/{_discovery_id(str(self._device.identifiers))}_{name}/config"
             for entity_type, name in REMOVED_ENTITIES
         ]
 
@@ -382,6 +395,24 @@ class Homeassistant:
             message.topic == self._status_topic
             and message.payload.decode("utf-8", errors="replace") == self._status_online
         ):
+            # Anyone with access to the broker can publish here. A flood of
+            # online messages would otherwise start a timer thread each, until
+            # no more threads can be started, so one republish is queued at a
+            # time.
+            with self._online_lock:
+                if self._online_timer is not None and self._online_timer.is_alive():
+                    self.logger.debug(
+                        "Home Assistant online again, a republish is already queued",
+                    )
+                    return
+                timer = threading.Timer(
+                    HOMEASSISTANT_ONLINE_STATE_DELAY,
+                    MQTT.event.emit,
+                    args=("homeassistant_online",),
+                )
+                timer.daemon = True
+                self._online_timer = timer
+
             self.logger.info(
                 "Home Assistant is online, publishing discovery and latest readings",
             )
@@ -390,10 +421,4 @@ class Homeassistant:
             # The readings are not retained, so Home Assistant shows them as
             # unknown until the next report. Wait briefly so it has created the
             # entities from the discovery messages before the state arrives.
-            timer = threading.Timer(
-                HOMEASSISTANT_ONLINE_STATE_DELAY,
-                MQTT.event.emit,
-                args=("homeassistant_online",),
-            )
-            timer.daemon = True
             timer.start()

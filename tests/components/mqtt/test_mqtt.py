@@ -303,3 +303,47 @@ def test_user_without_password_sends_no_password(static_config):
     _, client = _make_mqtt(static_config)
 
     client.username_pw_set.assert_called_once_with("test", None)
+
+
+def test_connect_failure_is_logged_without_a_traceback(static_config, caplog):
+    """The reason is logged on one line, a traceback only buried it."""
+    mqtt, client = _make_mqtt(static_config, exit_on_fail=False)
+    client.connect.side_effect = ConnectionRefusedError(111, "Connection refused")
+
+    mqtt.connect("127.0.0.1", 1883, 60)
+
+    assert "Connection refused" in caplog.text
+    assert "Traceback" not in caplog.text
+
+
+def test_failed_reconnects_are_logged_once_per_outage(static_config, caplog):
+    """Paho only logs failed reconnects at debug, so they are logged here.
+
+    Once per outage, so a broker that is down for hours doesn't fill the log.
+    """
+    mqtt, client = _make_mqtt(static_config, exit_on_fail=False)
+    assert client.on_connect_fail == mqtt._mqtt_on_connect_fail
+
+    for _ in range(3):
+        mqtt._mqtt_on_connect_fail(client, None)
+    assert caplog.text.count("Unable to reach the MQTT Broker") == 1
+
+    mqtt._mqtt_on_connect(client, None, None, SUCCESS)
+    mqtt._mqtt_on_connect_fail(client, None)
+    assert caplog.text.count("Unable to reach the MQTT Broker") == 2  # noqa: PLR2004
+
+
+def test_listener_error_does_not_stop_the_mqtt_loop(static_config):
+    """An exception in one message listener doesn't escape the paho callback."""
+    from redreactor.components.mqtt import MQTT
+
+    mqtt, client = _make_mqtt(static_config)
+    later = MagicMock()
+    MQTT.event.on("on_message", MagicMock(side_effect=RecursionError()))
+    MQTT.event.on("on_message", later)
+    message = MagicMock()
+    message.payload = b"1"
+
+    mqtt._mqtt_on_message(client, None, message)
+
+    later.assert_called_once()

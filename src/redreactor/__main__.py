@@ -64,11 +64,20 @@ def main() -> None:
 
     # Create handlers
     c_handler = logging.StreamHandler()
-    f_handler = RotatingFileHandler(
-        args.logging_file,
-        maxBytes=DEFAULT_LOG_MAX_BYTES,
-        backupCount=DEFAULT_LOG_BACKUP_COUNT,
-    )
+    f_handler: logging.Handler | None
+    try:
+        f_handler = RotatingFileHandler(
+            args.logging_file,
+            maxBytes=DEFAULT_LOG_MAX_BYTES,
+            backupCount=DEFAULT_LOG_BACKUP_COUNT,
+        )
+    except OSError as error:
+        # The battery monitoring matters more than the log file, so carry on
+        # with the console log only
+        f_handler = None
+        log_file_error: OSError | None = error
+    else:
+        log_file_error = None
 
     # Create formatters and add it to handlers
     c_format = logging.Formatter(
@@ -79,11 +88,16 @@ def main() -> None:
         datefmt="%d-%b-%y %H:%M:%S",
     )
     c_handler.setFormatter(c_format)
-    f_handler.setFormatter(f_format)
-
-    # Add handlers to the logger
     logger.addHandler(c_handler)
-    logger.addHandler(f_handler)
+    if f_handler is not None:
+        f_handler.setFormatter(f_format)
+        logger.addHandler(f_handler)
+    else:
+        logger.warning(
+            "Unable to open the log file %s (%s), logging to the console only",
+            args.logging_file,
+            log_file_error,
+        )
 
     logger.info("#########################################")
     logger.info("#### Red Reactor MQTT Client (%s) ####", version("redreactor"))
@@ -97,14 +111,20 @@ def main() -> None:
             args.configuration_file,
             args.database_file,
         )
-    except ConfigurationError:
-        logger.exception("Unable to start with the current configuration")
+    except ConfigurationError as error:
+        # The message names the problem, a traceback would only bury it
+        logger.error(  # noqa: TRY400
+            "Unable to start with the current configuration: %s",
+            error,
+        )
         sys.exit(1)
 
     # Update logging levels, limited to listed set. Handler.setLevel() only
     # accepts upper case names, so normalise them first.
     logging_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
     for handler, name in ((c_handler, "console"), (f_handler, "file")):
+        if handler is None:
+            continue
         level = str(configuration.static["logging"][name]).upper()
         if level in logging_levels:
             handler.setLevel(level)
