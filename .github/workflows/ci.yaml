@@ -11,121 +11,8 @@ env:
   DEFAULT_PYTHON: '3.11'
 
 jobs:
-  codespell:
-    name: Codespell
-    runs-on: ubuntu-latest
-    steps:
-      - name: ⤵️ Check out code from GitHub
-        uses: actions/checkout@v7
-      - name: 🏗 Set up uv and Python ${{ env.DEFAULT_PYTHON }}
-        # astral-sh/setup-uv v10.3.3
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
-        with:
-          python-version: ${{ env.DEFAULT_PYTHON }}
-      - name: 🏗 Install Python dependencies
-        run: uv sync --locked
-      - name: 🚀 Check code for common misspellings
-        run: uv run pre-commit run codespell --all-files
-
-  ruff:
-    name: Ruff
-    runs-on: ubuntu-latest
-    steps:
-      - name: ⤵️ Check out code from GitHub
-        uses: actions/checkout@v7
-      - name: 🏗 Set up uv and Python ${{ env.DEFAULT_PYTHON }}
-        # astral-sh/setup-uv v10.3.3
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
-        with:
-          python-version: ${{ env.DEFAULT_PYTHON }}
-      - name: 🏗 Install Python dependencies
-        run: uv sync --locked
-      - name: 🚀 Run Ruff
-        run: uv run ruff check .
-
-  black:
-    name: Black
-    runs-on: ubuntu-latest
-    steps:
-      - name: ⤵️ Check out code from GitHub
-        uses: actions/checkout@v7
-      - name: 🏗 Set up uv and Python ${{ env.DEFAULT_PYTHON }}
-        # astral-sh/setup-uv v10.3.3
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
-        with:
-          python-version: ${{ env.DEFAULT_PYTHON }}
-      - name: 🏗 Install Python dependencies
-        run: uv sync --locked
-      - name: 🚀 Run black on docs
-        run: uv run blacken-docs
-
-  pre-commit-hooks:
-    name: Pre Commit Hooks
-    runs-on: ubuntu-latest
-    steps:
-      - name: ⤵️ Check out code from GitHub
-        uses: actions/checkout@v7
-      - name: 🏗 Set up uv and Python ${{ env.DEFAULT_PYTHON }}
-        # astral-sh/setup-uv v10.3.3
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
-        with:
-          python-version: ${{ env.DEFAULT_PYTHON }}
-      - name: 🏗 Install Python dependencies
-        run: uv sync --locked
-      - name: 🏗 Cache pre-commit hook environments
-        # The Renovate validator hook installs Node.js and Renovate, which
-        # takes about a minute when it isn't cached
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/pre-commit
-          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
-      - name: 🚀 Check Python AST
-        run: uv run pre-commit run check-ast --all-files
-      - name: 🚀 Check for case conflicts
-        run: uv run pre-commit run check-case-conflict --all-files
-      - name: 🚀 Check docstring is first
-        run: uv run pre-commit run check-docstring-first --all-files
-      - name: 🚀 Check that executables have shebangs
-        run: uv run pre-commit run check-executables-have-shebangs --all-files
-      - name: 🚀 Check JSON files
-        run: uv run pre-commit run check-json --all-files
-      - name: 🚀 Check for merge conflicts
-        run: uv run pre-commit run check-merge-conflict --all-files
-      - name: 🚀 Check for broken symlinks
-        run: uv run pre-commit run check-symlinks --all-files
-      - name: 🚀 Check TOML files
-        run: uv run pre-commit run check-toml --all-files
-      - name: 🚀 Check XML files
-        run: uv run pre-commit run check-xml --all-files
-      - name: 🚀 Check YAML files
-        run: uv run pre-commit run check-yaml --all-files
-      - name: 🚀 Detect Private Keys
-        run: uv run pre-commit run detect-private-key --all-files
-      - name: 🚀 Check End of Files
-        run: uv run pre-commit run end-of-file-fixer --all-files
-      - name: 🚀 Trim Trailing Whitespace
-        run: uv run pre-commit run trailing-whitespace --all-files
-      - name: 🚀 Check Renovate configuration
-        run: uv run pre-commit run renovate-config-validator --all-files
-
-  mypy:
-    name: MyPy
-    runs-on: ubuntu-latest
-    steps:
-      - name: ⤵️ Check out code from GitHub
-        uses: actions/checkout@v7
-      - name: 🏗 Set up uv and Python ${{ env.DEFAULT_PYTHON }}
-        # astral-sh/setup-uv v10.3.3
-        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
-        with:
-          python-version: ${{ env.DEFAULT_PYTHON }}
-      - name: 🏗 Install Python dependencies
-        run: uv sync --locked
-      - name: 🚀 Run mypy
-        run: uv run mypy src
-
-  prettier:
-    name: Prettier
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - name: ⤵️ Check out code from GitHub
@@ -144,11 +31,48 @@ jobs:
           cache: 'npm'
       - name: 🏗 Install NPM dependencies
         run: npm install
-      - name: 🚀 Run prettier
-        run: uv run pre-commit run prettier --all-files
+      - name: 🏗 Cache pre-commit hook environments
+        # The Renovate validator hook installs Node.js and Renovate, which
+        # takes about a minute when it isn't cached
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+      - name: 🚀 Run every pre-commit hook
+        # One install for all the checks: Ruff, Black on the code and the docs,
+        # codespell, Prettier, yamllint, the uv.lock check and the file checks.
+        # The formatters fail the job when they would change a file.
+        # no-commit-to-branch only applies to local commits, and mypy runs
+        # below on the package only
+        env:
+          SKIP: no-commit-to-branch,mypy
+        run: uv run pre-commit run --all-files --show-diff-on-failure
+      - name: 🚀 Run mypy
+        run: uv run mypy src
 
   pytest:
-    name: Pytest
+    name: Pytest (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest supported Python, and the one the Home Assistant app runs
+        python: ['3.11', '3.15']
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@v7
+      - name: 🏗 Set up uv and Python ${{ matrix.python }}
+        # astral-sh/setup-uv v10.3.3
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          python-version: ${{ matrix.python }}
+      - name: 🏗 Install Python dependencies
+        run: uv sync --locked
+      - name: 🚀 Run pytest
+        run: uv run pytest
+
+  broker:
+    name: Broker test (built wheel)
     runs-on: ubuntu-latest
     steps:
       - name: ⤵️ Check out code from GitHub
@@ -158,7 +82,26 @@ jobs:
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
         with:
           python-version: ${{ env.DEFAULT_PYTHON }}
-      - name: 🏗 Install Python dependencies
-        run: uv sync --locked
-      - name: 🚀 Run pytest
-        run: uv run pytest
+      - name: 🏗 Start Mosquitto
+        # On its own port, in case the package's service also starts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mosquitto
+          mosquitto -d -p 18830
+      - name: 🏗 Build the wheel and install it on its own
+        # The test runs the service from the wheel, as it would be released,
+        # not from the source tree
+        run: |
+          uv build --wheel
+          uv venv "${RUNNER_TEMP}/wheel"
+          uv pip install --python "${RUNNER_TEMP}/wheel" dist/*.whl \
+            pytest paho-mqtt
+      - name: 🚀 Run the broker test
+        env:
+          REDREACTOR_TEST_BROKER: 127.0.0.1:18830
+        # Run from outside the source tree so the wheel is imported, and
+        # without pyproject.toml's coverage options
+        working-directory: ${{ runner.temp }}
+        run: |
+          "${RUNNER_TEMP}/wheel/bin/python" -m pytest -p no:cacheprovider \
+            -c /dev/null "${GITHUB_WORKSPACE}/tests/integration" -v

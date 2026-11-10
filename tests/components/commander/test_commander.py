@@ -496,8 +496,10 @@ def test_on_message_ignores_a_large_payload(commander, static_config, dynamic_co
 def test_on_message_deeply_nested_json_is_ignored(commander, static_config):
     """Nested JSON that raises RecursionError is only logged.
 
-    The size limit already stops this payload, so the limit is raised here to
-    check the decode error is caught too. It used to stop the service.
+    The size limit already stops a payload like this. Whether decoding one
+    raises RecursionError depends on the Python version (Python 3.15.2 decodes
+    100,000 levels), so the error is raised here to check it is caught. It
+    used to stop the service.
     """
     cmd, _ = commander
     topic = "/".join(
@@ -508,18 +510,18 @@ def test_on_message_deeply_nested_json_is_ignored(commander, static_config):
             "report_interval",
         ),
     )
-    payload = "[" * 100_000 + "]" * 100_000
 
     with (
         patch(
-            "redreactor.components.commander.commander.COMMAND_PAYLOAD_MAXIMUM",
-            len(payload),
+            "redreactor.components.commander.commander.json.loads",
+            side_effect=RecursionError,
         ),
         patch.object(cmd.logger, "warning") as mock_warn,
     ):
-        cmd._on_message(None, None, _make_mock_message(topic, payload))
+        cmd._on_message(None, None, _make_mock_message(topic, "[[]]"))
 
     assert "not valid JSON" in mock_warn.call_args.args[0]
+    assert cmd._dynamic_configuration.data["report_interval"] == 30
 
 
 def test_on_command_unsplittable_command_still_disconnects(commander, static_config):
