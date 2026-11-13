@@ -1100,3 +1100,87 @@ def test_monitor_recovers_after_i2c_read_error(monitor, mock_ina, caplog):
     assert monitor._read_failures == 0
     assert monitor.data.voltage == 3.9
     assert "after 1 failed readings" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Readings and reports don't interleave
+# ---------------------------------------------------------------------------
+
+
+def test_shutdown_is_emitted_outside_the_data_lock(monitor, mock_ina):
+    """The shutdown waits for the offline status, so must not block reports."""
+    import threading
+
+    mock_ina.voltage.return_value = DEFAULT_BATTERY_VOLTAGE_MINIMUM
+    mock_ina.current.return_value = 50.0
+
+    lock_free = []
+
+    def shutdown() -> None:
+        # Another thread must be able to take the lock, as a report would
+        result = []
+
+        def take_lock() -> None:
+            acquired = monitor._data_lock.acquire(timeout=1)
+            if acquired:
+                monitor._data_lock.release()
+            result.append(acquired)
+
+        thread = threading.Thread(target=take_lock)
+        thread.start()
+        thread.join()
+        lock_free.append(result[0])
+
+    monitor.event.on("shutdown", shutdown)
+
+    with patch.object(monitor, "_update"):
+        for _ in range(DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS):
+            monitor._monitor(ina=mock_ina)
+
+    assert lock_free == [True]
+
+
+def test_report_waits_for_a_reading_in_progress(monitor, mock_ina):
+    """A report taken during a reading uses the finished reading, not half of it."""
+    import json
+    import threading
+
+    from redreactor.components.mqtt import MQTT
+
+    states = []
+    MQTT.event.on(
+        "publish",
+        lambda topic, payload, **_: (
+            states.append(json.loads(payload)) if topic.endswith("/state") else None
+        ),
+    )
+
+    reading_started = threading.Event()
+    finish_reading = threading.Event()
+
+    def slow_current() -> float:
+        reading_started.set()
+        finish_reading.wait(timeout=5)
+        return 50.0
+
+    mock_ina.voltage.return_value = 3.0
+    mock_ina.current.side_effect = slow_current
+
+    reader = threading.Thread(target=monitor._monitor, kwargs={"ina": mock_ina})
+    reader.start()
+    assert reading_started.wait(timeout=5)
+
+    reporter = threading.Thread(target=monitor._update)
+    reporter.start()
+    # The report can't be sent while the reading holds the lock
+    reporter.join(timeout=0.2)
+    assert reporter.is_alive()
+
+    finish_reading.set()
+    reader.join(timeout=5)
+    reporter.join(timeout=5)
+
+    # Every report sent has the new voltage with its matching current
+    assert states
+    assert all(state["voltage"] == 3.0 for state in states)
+    assert all(state["current"] == -50.0 for state in states)
