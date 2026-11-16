@@ -7,7 +7,7 @@ import logging
 import sys
 from collections import deque
 from itertools import pairwise
-from threading import Lock
+from threading import Lock, RLock
 from typing import TYPE_CHECKING, Any
 
 from ina219 import INA219, DeviceRangeError
@@ -175,6 +175,10 @@ class Monitor:
         # Guards the two flags above, which the MQTT thread and the monitor
         # timer thread both use
         self._report_lock = Lock()
+        # Held while a reading is taken and while a report is put together,
+        # which happen on different threads, so a report never mixes values
+        # from two readings (such as a new voltage with the old level)
+        self._data_lock = RLock()
 
         # Register Dynamic Configuration update listener
         self._dynamic_configuration.event.on(event_name="write", function=self._update)
@@ -222,13 +226,34 @@ class Monitor:
         )
         self.monitor_timer.start()
 
-    def _monitor(self, ina: INA219) -> None:  # noqa: C901, PLR0912, PLR0915
+    def _monitor(self, ina: INA219) -> None:
         """Monitor INA Thread Loop.
 
-        Gets called every 'monitor_interval'.
+        Gets called every 'monitor_interval'. The shutdown is started outside
+        the data lock, as it waits for the offline status to be delivered and
+        for the shutdown command to run.
         """
         self.logger.debug("Monitoring thread has been started")
 
+        with self._data_lock:
+            shutdown = self._take_reading(ina)
+
+        # Shutdown system, once, the readings carry on while it runs
+        if shutdown and not self._shutdown_emitted:
+            self._shutdown_emitted = True
+            self.logger.warning(
+                "Forcing system shutdown, going offline with %fV",
+                round(self.data.voltage, 2),
+            )
+
+            # Emit the shutdown event
+            self.event.emit("shutdown")
+
+    def _take_reading(self, ina: INA219) -> bool:  # noqa: C901, PLR0912
+        """Read the INA219 and decide on the power state.
+
+        Returns whether the battery is low enough to shut down.
+        """
         # Update the Dynamic Configuration to ensure the calculations will be based correctly off the changeable values # noqa: E501
         self._update_dynamic_configuration()
 
@@ -285,7 +310,7 @@ class Monitor:
                         error,
                         self._static_configuration["ina"]["monitor_interval"],
                     )
-                return
+                return False
             else:
                 if self._read_failures:
                     self.logger.warning(
@@ -347,16 +372,7 @@ class Monitor:
         else:
             self._empty_readings = 0
 
-        # Shutdown system, once, the readings carry on while it runs
-        if shutdown and not self._shutdown_emitted:
-            self._shutdown_emitted = True
-            self.logger.warning(
-                "Forcing system shutdown, going offline with %fV",
-                round(self.data.voltage, 2),
-            )
-
-            # Emit the shutdown event
-            self.event.emit("shutdown")
+        return shutdown
 
     def _set_external_power(
         self,
@@ -621,13 +637,16 @@ class Monitor:
         """Pushes the latest data to Monitor endpoint."""
         if self._stopped:
             return
-        # Force a update of the dynamic configuration values
-        self._update_dynamic_configuration()
+        with self._data_lock:
+            # Force a update of the dynamic configuration values
+            self._update_dynamic_configuration()
 
-        # Update CPU information before publishing info
-        self._update_cpu_information()
+            # Update CPU information before publishing info
+            self._update_cpu_information()
 
-        self.data.battery_time_remaining = self._calculate_battery_time_remaining()
+            self.data.battery_time_remaining = self._calculate_battery_time_remaining()
+
+            payload = json.dumps(self._state_payload())
 
         # Publish heartbeat to status endpoint
         MQTT.event.emit(
@@ -642,74 +661,76 @@ class Monitor:
         MQTT.event.emit(
             event_name="publish",
             topic=f"{self._static_configuration['mqtt']['base_topic']}/{self._static_configuration['hostname']['name']}/{self._static_configuration['mqtt']['topic']['state']}",
-            payload=json.dumps(
-                {
-                    f"{self._static_configuration['fields']['voltage']['name']}": round(
-                        self.data.voltage,
-                        3,
-                    ),
-                    # The INA219 reads the discharge current as positive. It is
-                    # published the other way round, negative while the battery
-                    # is discharging and positive while it is charging.
-                    # Adding 0.0 turns -0.0 (a zero reading negated) into 0.0
-                    f"{self._static_configuration['fields']['current']['name']}": round(
-                        -self.data.current,
-                        4,
-                    )
-                    + 0.0,
-                    f"{self._static_configuration['fields']['power']['name']}": round(
-                        self.data.power,
-                        3,
-                    ),
-                    f"{self._static_configuration['fields']['battery_level']['name']}": self.data.battery_level,  # noqa: E501
-                    f"{self._static_configuration['fields']['external_power']['name']}": (  # noqa: E501
-                        self._static_configuration["fields"][  # noqa: E501
-                            "external_power"
-                        ].get(
-                            "payload_on",
-                            "ON",
-                        )
-                        if self.data.external_power
-                        else self._static_configuration["fields"]["external_power"].get(
-                            "payload_off",
-                            "OFF",
-                        )
-                    ),
-                    f"{self._static_configuration['fields']['charging']['name']}": (
-                        self._static_configuration["fields"]["charging"].get(
-                            "payload_on",
-                            "ON",
-                        )
-                        if self.data.charging
-                        else self._static_configuration["fields"]["charging"].get(
-                            "payload_off",
-                            "OFF",
-                        )
-                    ),
-                    f"{self._static_configuration['fields']['cpu_temperature']['name']}": self.data.cpu_temperature,  # noqa: E501
-                    f"{self._static_configuration['fields']['under_voltage']['name']}": self._cpu_stat_payload(  # noqa: E501
-                        "under_voltage",
-                        UNDER_VOLTAGE_MASK,
-                    ),
-                    f"{self._static_configuration['fields']['throttled']['name']}": self._cpu_stat_payload(  # noqa: E501
-                        "throttled",
-                        THROTTLED_MASK,
-                    ),
-                    f"{self._static_configuration['fields']['cpu_stat_text']['name']}": self.data.cpu_stat_text,  # noqa: E501
-                    f"{self._static_configuration['fields']['battery_warning_threshold']['name']}": self.data.battery_warning_threshold,  # noqa: E501
-                    f"{self._static_configuration['fields']['battery_voltage_minimum']['name']}": self.data.battery_voltage_minimum,  # noqa: E501
-                    f"{self._static_configuration['fields']['battery_voltage_maximum']['name']}": self.data.battery_voltage_maximum,  # noqa: E501
-                    f"{self._static_configuration['fields']['report_interval']['name']}": self.data.report_interval,  # noqa: E501
-                    f"{self._static_configuration['fields']['battery_capacity']['name']}": self.data.battery_capacity,  # noqa: E501
-                    f"{self._static_configuration['fields']['battery_time_remaining']['name']}": self.data.battery_time_remaining,  # noqa: E501
-                },
-            ),
+            payload=payload,
             # Retained so Home Assistant gets the latest readings as soon as
             # it subscribes, after discovery or its own restart, instead of
             # waiting for the next report. The status topic's Last Will marks
             # them unavailable if this device drops off.
             retain=True,
         )
+
+    def _state_payload(self) -> dict[str, Any]:
+        """Return the state message, keyed by each field's configured name."""
+        return {
+            f"{self._static_configuration['fields']['voltage']['name']}": round(
+                self.data.voltage,
+                3,
+            ),
+            # The INA219 reads the discharge current as positive. It is
+            # published the other way round, negative while the battery
+            # is discharging and positive while it is charging.
+            # Adding 0.0 turns -0.0 (a zero reading negated) into 0.0
+            f"{self._static_configuration['fields']['current']['name']}": round(
+                -self.data.current,
+                4,
+            )
+            + 0.0,
+            f"{self._static_configuration['fields']['power']['name']}": round(
+                self.data.power,
+                3,
+            ),
+            f"{self._static_configuration['fields']['battery_level']['name']}": self.data.battery_level,  # noqa: E501
+            f"{self._static_configuration['fields']['external_power']['name']}": (  # noqa: E501
+                self._static_configuration["fields"][  # noqa: E501
+                    "external_power"
+                ].get(
+                    "payload_on",
+                    "ON",
+                )
+                if self.data.external_power
+                else self._static_configuration["fields"]["external_power"].get(
+                    "payload_off",
+                    "OFF",
+                )
+            ),
+            f"{self._static_configuration['fields']['charging']['name']}": (
+                self._static_configuration["fields"]["charging"].get(
+                    "payload_on",
+                    "ON",
+                )
+                if self.data.charging
+                else self._static_configuration["fields"]["charging"].get(
+                    "payload_off",
+                    "OFF",
+                )
+            ),
+            f"{self._static_configuration['fields']['cpu_temperature']['name']}": self.data.cpu_temperature,  # noqa: E501
+            f"{self._static_configuration['fields']['under_voltage']['name']}": self._cpu_stat_payload(  # noqa: E501
+                "under_voltage",
+                UNDER_VOLTAGE_MASK,
+            ),
+            f"{self._static_configuration['fields']['throttled']['name']}": self._cpu_stat_payload(  # noqa: E501
+                "throttled",
+                THROTTLED_MASK,
+            ),
+            f"{self._static_configuration['fields']['cpu_stat_text']['name']}": self.data.cpu_stat_text,  # noqa: E501
+            f"{self._static_configuration['fields']['battery_warning_threshold']['name']}": self.data.battery_warning_threshold,  # noqa: E501
+            f"{self._static_configuration['fields']['battery_voltage_minimum']['name']}": self.data.battery_voltage_minimum,  # noqa: E501
+            f"{self._static_configuration['fields']['battery_voltage_maximum']['name']}": self.data.battery_voltage_maximum,  # noqa: E501
+            f"{self._static_configuration['fields']['report_interval']['name']}": self.data.report_interval,  # noqa: E501
+            f"{self._static_configuration['fields']['battery_capacity']['name']}": self.data.battery_capacity,  # noqa: E501
+            f"{self._static_configuration['fields']['battery_time_remaining']['name']}": self.data.battery_time_remaining,  # noqa: E501
+        }
 
     def _cpu_stat_payload(self, field: str, mask: int) -> str | None:
         """Return a binary sensor payload for bits of the throttling bitmask.

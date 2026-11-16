@@ -466,3 +466,78 @@ def test_discovery_topic_is_valid_for_any_hostname(
     )
     for topic in homeassistant._removed_entity_topics():
         assert topic.split("/")[2].startswith(device_id)
+
+
+# ---------------------------------------------------------------------------
+# Expire after follows the report interval
+# ---------------------------------------------------------------------------
+
+
+def test_expire_after_kept_when_longer_than_two_reports(homeassistant):
+    """The default 30 second report interval keeps the configured 120 seconds."""
+    assert _components(homeassistant)["voltage"]["expire_after"] == 120
+
+
+def test_expire_after_raised_for_a_long_report_interval(
+    static_config,
+    dynamic_config,
+):
+    """A report interval above the expire after time no longer expires entities."""
+    from redreactor.components.homeassistant import Homeassistant
+
+    dynamic_config.data["report_interval"] = 300
+
+    homeassistant = Homeassistant(static_config, dynamic_config)
+
+    components = _components(homeassistant)
+    assert components["voltage"]["expire_after"] == 630
+    assert "expire_after" not in components["power_event"]
+
+
+def test_expire_after_zero_is_kept(static_config, dynamic_config):
+    """0 turns expiry off, whatever the report interval."""
+    from redreactor.components.homeassistant import Homeassistant
+
+    static_config["homeassistant"]["expire_after"] = 0
+    dynamic_config.data["report_interval"] = 300
+
+    homeassistant = Homeassistant(static_config, dynamic_config)
+
+    assert _components(homeassistant)["voltage"]["expire_after"] == 0
+
+
+@pytest.mark.usefixtures("homeassistant")
+def test_report_interval_change_republishes_discovery(dynamic_config):
+    """Changing the report interval from Home Assistant updates the expiry."""
+    import json
+
+    from redreactor.components.mqtt import MQTT
+
+    published = []
+    MQTT.event.on(
+        "publish",
+        lambda topic, payload, **_: published.append((topic, payload)),
+    )
+
+    dynamic_config.data["report_interval"] = 200
+    dynamic_config.event.emit("write")
+
+    discovery = [payload for topic, payload in published if topic == DEVICE_TOPIC]
+    assert len(discovery) == 1
+    components = json.loads(discovery[0])["components"]
+    assert components["voltage"]["expire_after"] == 430
+    assert "expire_after" not in components["power_event"]
+
+
+@pytest.mark.usefixtures("homeassistant")
+def test_unrelated_setting_change_does_not_republish(dynamic_config):
+    """A change that keeps the expiry the same sends no discovery."""
+    from redreactor.components.mqtt import MQTT
+
+    published = []
+    MQTT.event.on("publish", lambda topic, **_: published.append(topic))
+
+    dynamic_config.data["battery_capacity"] = 3500
+    dynamic_config.event.emit("write")
+
+    assert DEVICE_TOPIC not in published

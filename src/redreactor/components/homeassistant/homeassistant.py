@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from redreactor.components.mqtt import MQTT
 from redreactor.const import (
+    HOMEASSISTANT_EXPIRE_AFTER_MARGIN,
     HOMEASSISTANT_MIGRATION_DELAY,
     HOMEASSISTANT_ONLINE_STATE_DELAY,
 )
@@ -90,7 +91,15 @@ class Homeassistant:
         self._online_lock = threading.Lock()
         self._online_timer: threading.Timer | None = None
 
+        self._expire_after = self._effective_expire_after()
         self._process_homeassistant_configuration(static_configuration)
+
+        # A new report interval can change the expire after time, which Home
+        # Assistant only learns from the discovery message
+        self._dynamic_configuration.event.on(
+            event_name="write",
+            function=self._dynamic_configuration_written,
+        )
 
         # Register MQTT listeners
         MQTT.event.on(event_name="on_connect", function=self._mqtt_on_connect)
@@ -134,7 +143,7 @@ class Homeassistant:
             configuring: Base = Base(
                 name=f"{field.get('pretty')}",
                 device_class=field.get("device_class", None),
-                expire_after=int(static_configuration["homeassistant"]["expire_after"]),
+                expire_after=self._expire_after,
                 entity_category=field.get("entity_category", None),
                 icon=field.get("icon", None),
                 default_entity_id=self._default_entity_id(
@@ -214,6 +223,43 @@ class Homeassistant:
             configured.component_id = str(field["name"])
 
             self.configuration.append(configured)
+
+    def _effective_expire_after(self) -> int:
+        """Return the expire after time sent to Home Assistant, in seconds.
+
+        Home Assistant marks an entity unavailable when no state arrives within
+        `expire_after`. The report interval can be set up to 300 seconds from
+        Home Assistant, longer than the default 120 second expire after, which
+        would leave every entity unavailable between reports. So the time is
+        raised to at least two report intervals plus a margin. 0 turns expiry
+        off and is kept as it is.
+        """
+        configured = int(self._static_configuration["homeassistant"]["expire_after"])
+        if configured == 0:
+            return 0
+
+        report_interval = int(self._dynamic_configuration.data["report_interval"])
+        return max(
+            configured,
+            2 * report_interval + HOMEASSISTANT_EXPIRE_AFTER_MARGIN,
+        )
+
+    def _dynamic_configuration_written(self) -> None:
+        """Republish discovery when the expire after time has changed."""
+        expire_after = self._effective_expire_after()
+        if expire_after == self._expire_after:
+            return
+
+        self.logger.info(
+            "Report interval changed, Home Assistant expire after is now %is",
+            expire_after,
+        )
+        self._expire_after = expire_after
+        for entity in self.configuration:
+            # Events never expire
+            if entity.expire_after is not None:
+                entity.expire_after = expire_after
+        self._publish_device_discovery()
 
     def _default_entity_id(self, field: dict[str, Any], device_name: str) -> str:
         """Return the entity ID Home Assistant should create the entity with.
@@ -418,7 +464,7 @@ class Homeassistant:
             )
             self._update_homeassistant_configuration()
 
-            # The readings are not retained, so Home Assistant shows them as
-            # unknown until the next report. Wait briefly so it has created the
-            # entities from the discovery messages before the state arrives.
+            # The readings are retained, but they are sent again so Home
+            # Assistant has fresh ones straight after it restarts. Wait briefly
+            # so it has created the entities from the discovery message first.
             timer.start()

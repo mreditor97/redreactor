@@ -40,6 +40,10 @@ DEFAULT_LOG_BACKUP_COUNT = 3
 # Seconds to wait after Home Assistant comes online before resending the latest
 # readings, so the entities exist when the state message arrives
 HOMEASSISTANT_ONLINE_STATE_DELAY = 2.0
+# Seconds added to twice the report interval for the Home Assistant expire
+# after time, so one late or missed report doesn't mark the entities
+# unavailable. Used when the configured expire after is shorter than that.
+HOMEASSISTANT_EXPIRE_AFTER_MARGIN = 30
 # Event types published on the power event topic, for Home Assistant automations
 POWER_EVENT_POWER_LOST = "power_lost"
 POWER_EVENT_POWER_RESTORED = "power_restored"
