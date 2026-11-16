@@ -6,23 +6,18 @@ import json
 import logging
 import sys
 import time
-from collections import deque
-from itertools import pairwise
 from threading import Lock, RLock
 from typing import TYPE_CHECKING, Any
 
 from redreactor.components.monitor.data import MonitorData
 from redreactor.components.mqtt import MQTT
 from redreactor.const import (
+    DEFAULT_BATTERY_AVERAGE_READINGS,
     DEFAULT_BATTERY_INTERNAL_RESISTANCE,
     DEFAULT_BATTERY_REPORT_LEVEL_CHANGE,
     DEFAULT_BATTERY_VOLTAGE_HEADROOM,
-    DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
-    DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
-    DEFAULT_BATTERY_VOLTAGE_MINIMUM,
+    DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS,
     DYNAMIC_SETTINGS,
-    HOURS_PER_DAY,
-    LAST_SHUTDOWN_KEY,
     POWER_EVENT_LOW_BATTERY,
     POWER_EVENT_POWER_LOST,
     POWER_EVENT_POWER_RESTORED,
@@ -30,12 +25,12 @@ from redreactor.const import (
     SENSOR_PROBLEM_READINGS,
     WATCHDOG_TICK_MARGIN,
 )
+from redreactor.helpers import battery
 from redreactor.helpers.cpu_utils import (
     FREQ_CAPPED_BIT,
     SOFT_TEMP_LIMIT_BIT,
     THROTTLED_BIT,
     UNDER_VOLTAGE_BIT,
-    decode_cpu_stat_text,
     read_cpu_stat,
     read_cpu_temperature,
 )
@@ -167,8 +162,8 @@ class Monitor:
     # reported as soon as it is taken
     _report_pending: bool = False
 
-    # Recent (voltage, current) readings averaged for the battery level
-    _battery_readings: deque[tuple[float, float]]
+    # Recent readings averaged for the battery level
+    _battery_readings: battery.ReadingAverage
 
     # Timers
     monitor_timer: RepeatTimer  # Runs Monitoring calculations
@@ -187,11 +182,28 @@ class Monitor:
         self._static_configuration = static_configuration
         self._dynamic_configuration = dynamic_configuration
         self._topics = Topics.from_configuration(static_configuration)
-        # Sized from the readings averaged setting by
-        # _update_dynamic_configuration below
-        self._battery_readings = deque(maxlen=self.data.average_readings)
+        battery_configuration = static_configuration.get("battery", {})
+        self._monitor_interval = float(static_configuration["ina"]["monitor_interval"])
+        self._battery_readings = battery.ReadingAverage(
+            int(
+                battery_configuration.get(
+                    "average_readings",
+                    DEFAULT_BATTERY_AVERAGE_READINGS,
+                ),
+            ),
+        )
+        # Low battery readings in a row needed before shutting down
+        self._shutdown_readings = int(
+            battery_configuration.get(
+                "shutdown_readings",
+                DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS,
+            ),
+        )
         self._has_reading = False
         self._read_failures = 0
+        # Set after several INA219 reads in a row have failed, the readings
+        # are then sent as unknown rather than the last good ones
+        self._sensor_problem = False
         self._report_pending = False
         self._shutdown_emitted = False
         self._stopped = False
@@ -230,7 +242,6 @@ class Monitor:
 
         # Update Dynamic Configuration values to there latest values
         self._update_dynamic_configuration()
-        self._load_last_shutdown()
 
         # Setup the INA219
         try:
@@ -241,28 +252,13 @@ class Monitor:
             # Exit the program, non-zero so a supervisor can retry
             sys.exit(1)
 
-        self._ina = ina
-
         # Configure the monitor timer, start's as soon as possible
         self.monitor_timer = RepeatTimer(
-            self.data.monitor_interval,
+            self._monitor_interval,
             self._monitor,
             ina=ina,
         )
         self.monitor_timer.start()
-
-    def _load_last_shutdown(self) -> None:
-        """Read the last shutdown or restart saved before this start."""
-        last_shutdown = self._dynamic_configuration.data.get(LAST_SHUTDOWN_KEY)
-        self.data.last_shutdown = (
-            last_shutdown if isinstance(last_shutdown, dict) else None
-        )
-
-    def refresh(self) -> None:
-        """Take a reading and report it straight away, for the refresh button."""
-        self.logger.info("Refreshing the readings")
-        self._monitor(self._ina)
-        self._update()
 
     def is_healthy(self) -> bool:
         """Return whether the readings are still being taken.
@@ -272,7 +268,7 @@ class Monitor:
         """
         if self._stopped:
             return True
-        allowed = 2 * self.data.monitor_interval + WATCHDOG_TICK_MARGIN
+        allowed = 2 * self._monitor_interval + WATCHDOG_TICK_MARGIN
         return time.monotonic() - self._last_tick <= allowed
 
     def _monitor(self, ina: INA219) -> None:
@@ -287,8 +283,6 @@ class Monitor:
         with self._data_lock:
             shutdown = self._take_reading(ina)
             self._last_tick = time.monotonic()
-            # Checked and set under the lock, as the refresh button can take a
-            # reading at the same time as the timer
             start_shutdown = shutdown and not self._shutdown_emitted
             if start_shutdown:
                 self._shutdown_emitted = True
@@ -303,77 +297,16 @@ class Monitor:
             # Emit the shutdown event
             self.event.emit("shutdown")
 
-    def _take_reading(self, ina: INA219) -> bool:  # noqa: C901, PLR0912
+    def _take_reading(self, ina: INA219) -> bool:
         """Read the INA219 and decide on the power state.
 
         Returns whether the battery is low enough to shut down.
         """
         # The dynamic configuration isn't read again here: a change from MQTT
         # emits `write`, which runs `_update` and reads it straight away.
-        shutdown: bool = False
-
-        if ina:
-            try:
-                self.data.voltage = ina.voltage()
-                self.data.current = ina.current()
-                self.data.battery_level = self._average_battery_level(
-                    self.data.voltage,
-                    self.data.current,
-                )
-                # Worked out here rather than read from the INA219, as
-                # power() reads the overflow flag and the power register, two
-                # more I2C reads for what the chip calculates the same way.
-                # Volts x milliamps / 1000 is watts, always positive like the
-                # chip's own power register
-                self.data.power = abs(self.data.voltage * self.data.current) / 1000
-                # A negative current means the battery is being charged
-                self.data.charging = self.data.current < 0
-            except DeviceRangeError:
-                # The current is above what the INA219 can measure. The device
-                # is still running, so stay online and publish straight away,
-                # reporting the current as the configured maximum.
-                # Assume no external power so the device will still shutdown on a low voltage reading # noqa: E501
-                self.logger.exception("Battery current range error")
-                self._set_external_power(external_power=False, update=False)
-                self.data.charging = False
-                self.data.current = (
-                    float(self._static_configuration["ina"]["max_expected_amps"]) * 1000
-                )
-                # power() would raise the same error, so estimate it from the
-                # voltage and the capped current rather than keep a stale value
-                self.data.power = self.data.voltage * self.data.current / 1000
-                # The real current is unknown, so the voltage can't be
-                # corrected for the load
-                self.data.battery_level = self._average_battery_level(
-                    self.data.voltage,
-                    0.0,
-                )
-                self._update()
-            except ZeroDivisionError:
-                self.logger.exception(
-                    "Minimum Voltage %fV and Maximum Voltage %fV difference is equal to 0",  # noqa: E501
-                    self.data.battery_voltage_minimum,
-                    self.data.battery_voltage_maximum,
-                )
-            except OSError as error:
-                # An I2C read can fail with a loose connection or a busy bus.
-                # Skip this reading, rather than making a decision on stale
-                # values, and try again on the next tick.
-                self._reading_failed(error)
-                return False
-            else:
-                self._reading_worked()
-                # INA219 current sign convention on the Red Reactor:
-                #   > 10 mA  -- discharging (no external power)
-                #   0-10 mA  -- float charge (battery full, power present)
-                #   negative -- actively charging (power just reconnected)
-                if self.data.current > 10:
-                    # Power removed
-                    self._set_external_power(external_power=False)
-                else:
-                    # Power restored, the battery is floating (0-10 mA) or
-                    # actively charging (negative)
-                    self._set_external_power(external_power=True)
+        if ina and not self._read_ina(ina):
+            # Skip this reading, rather than making a decision on stale values
+            return False
 
         # Voltage above the nominal maximum indicates external power is present
         # (e.g. charger connected but INA219 current read was noisy/stale).
@@ -385,43 +318,123 @@ class Monitor:
             # Power detected from the voltage, published straight away
             self._set_external_power(external_power=True)
 
-        if ina and not self._start_up_checked:
-            self._start_up_checked = True
-            self._check_start_up_charge()
-
         if ina:
+            if not self._start_up_checked:
+                self._start_up_checked = True
+                self._check_start_up_charge()
             self._report_if_pending()
             self._report_if_changed()
 
-        if (
-            self.data.battery_level <= float(self.data.battery_warning_threshold)
-            and not self.data.external_power
-        ):
-            # Publish immediately so Home Assistant reflects the warning without
-            # waiting for the next scheduled report_interval tick.
-            self._update()
+        return self._check_low_battery()
 
-            self._empty_readings += 1
-            if self._empty_readings == 1:
-                self.publish_event(POWER_EVENT_LOW_BATTERY)
-            shutdown = self._empty_readings >= self.data.shutdown_readings
-            if not shutdown:
-                self.logger.warning(
-                    "Battery at %i%% (%fV), at or below the %i%% warning threshold, "
-                    "reading %i of %i before shutdown",
-                    self.data.battery_level,
-                    round(self.data.voltage, 2),
-                    self.data.battery_warning_threshold,
-                    self._empty_readings,
-                    self.data.shutdown_readings,
-                )
+    def _read_ina(self, ina: INA219) -> bool:
+        """Read the voltage and current, and work out the readings from them.
+
+        Returns False when the INA219 couldn't be read, so this reading is
+        skipped and the next tick tries again.
+        """
+        try:
+            self.data.voltage = ina.voltage()
+            self.data.current = ina.current()
+            self.data.battery_level = self._average_battery_level(
+                self.data.voltage,
+                self.data.current,
+            )
+        except DeviceRangeError as error:
+            self._current_out_of_range(error)
+            return True
+        except ZeroDivisionError:
+            self.logger.exception(
+                "Minimum Voltage %fV and Maximum Voltage %fV difference is equal to 0",  # noqa: E501
+                self.data.battery_voltage_minimum,
+                self.data.battery_voltage_maximum,
+            )
+            return True
+        except OSError as error:
+            # An I2C read can fail with a loose connection or a busy bus
+            self._reading_failed(error)
+            return False
+
+        # Worked out here rather than read from the INA219, as power() reads
+        # the overflow flag and the power register, two more I2C reads for
+        # what the chip calculates the same way. Volts x milliamps / 1000 is
+        # watts, always positive like the chip's own power register
+        self.data.power = abs(self.data.voltage * self.data.current) / 1000
+        # A negative current means the battery is being charged
+        self.data.charging = self.data.current < 0
+        self._reading_worked()
+        # INA219 current sign convention on the Red Reactor:
+        #   > 10 mA  -- discharging (no external power)
+        #   0-10 mA  -- float charge (battery full, power present)
+        #   negative -- actively charging (power just reconnected)
+        if self.data.current > 10:
+            # Power removed
+            self._set_external_power(external_power=False)
         else:
-            self._empty_readings = 0
+            # Power restored, the battery is floating or actively charging
+            self._set_external_power(external_power=True)
+        return True
 
+    def _current_out_of_range(self, error: DeviceRangeError) -> None:
+        """Handle a current above what the INA219 can measure.
+
+        The device is still running, so stay online and publish straight away,
+        reporting the current as the configured maximum. No external power is
+        assumed, so the device still shuts down on a low voltage reading.
+        """
+        self.logger.error("Battery current range error", exc_info=error)
+        self._set_external_power(external_power=False, update=False)
+        self.data.charging = False
+        self.data.current = (
+            float(self._static_configuration["ina"]["max_expected_amps"]) * 1000
+        )
+        # power() would raise the same error, so estimate it from the voltage
+        # and the capped current rather than keep a stale value
+        self.data.power = self.data.voltage * self.data.current / 1000
+        # The real current is unknown, so the voltage can't be corrected for
+        # the load
+        self.data.battery_level = self._average_battery_level(
+            self.data.voltage,
+            0.0,
+        )
+        self._update()
+
+    def _check_low_battery(self) -> bool:
+        """Count low battery readings, returning whether to shut down.
+
+        Only counted without external power. The shutdown needs
+        `battery.shutdown_readings` low readings in a row, so one bad reading
+        can't shut the device down.
+        """
+        if (
+            self.data.battery_level > float(self.data.battery_warning_threshold)
+            or self.data.external_power
+        ):
+            self._empty_readings = 0
+            return False
+
+        # Publish immediately so Home Assistant reflects the warning without
+        # waiting for the next scheduled report_interval tick.
+        self._update()
+
+        self._empty_readings += 1
+        if self._empty_readings == 1:
+            self.publish_event(POWER_EVENT_LOW_BATTERY)
+        shutdown = self._empty_readings >= self._shutdown_readings
+        if not shutdown:
+            self.logger.warning(
+                "Battery at %i%% (%fV), at or below the %i%% warning threshold, "
+                "reading %i of %i before shutdown",
+                self.data.battery_level,
+                round(self.data.voltage, 2),
+                self.data.battery_warning_threshold,
+                self._empty_readings,
+                self._shutdown_readings,
+            )
         return shutdown
 
     def _reading_failed(self, error: OSError) -> None:
-        """Count a failed read, reporting a sensor problem after several.
+        """Count a failed read, sending the readings as unknown after several.
 
         Logged once until a read works again, so a lasting fault doesn't flood
         the log.
@@ -431,23 +444,23 @@ class Monitor:
             self.logger.error(  # noqa: TRY400
                 "Unable to read the Red Reactor (%s), retrying every %ss",
                 error,
-                self.data.monitor_interval,
+                self._monitor_interval,
             )
         if self._read_failures >= SENSOR_PROBLEM_READINGS and not (
-            self.data.sensor_problem
+            self._sensor_problem
         ):
             # Send the readings as unknown, rather than leaving the last good
             # ones in Home Assistant as if they were current
             self.logger.error(  # noqa: TRY400
-                "%i Red Reactor readings in a row have failed, reporting a "
-                "sensor problem",
+                "%i Red Reactor readings in a row have failed, sending the "
+                "readings as unknown",
                 self._read_failures,
             )
-            self.data.sensor_problem = True
+            self._sensor_problem = True
             self._update()
 
     def _reading_worked(self) -> None:
-        """Clear the failed reads, and any sensor problem, after a good read."""
+        """Clear the failed reads after a good read, reporting straight away."""
         if not self._read_failures:
             return
         self.logger.warning(
@@ -455,8 +468,8 @@ class Monitor:
             self._read_failures,
         )
         self._read_failures = 0
-        if self.data.sensor_problem:
-            self.data.sensor_problem = False
+        if self._sensor_problem:
+            self._sensor_problem = False
             self._update()
 
     def _set_external_power(
@@ -582,136 +595,41 @@ class Monitor:
             )
 
     def _average_battery_level(self, voltage: float, current: float) -> int:
-        """Add a reading and calculate the battery level from the recent average.
+        """Add a reading and work out the battery level from the recent average.
 
-        Brief current spikes make single voltage readings jump, so the level
-        is worked out from the average of the last `battery.average_readings`
-        readings. The load correction is linear, so averaging the voltage and
-        current first gives the same result as averaging corrected voltages.
+        The level uses the average of the last `battery.average_readings`
+        readings, see `battery.ReadingAverage`.
         """
-        self._battery_readings.append((voltage, current))
-        count = len(self._battery_readings)
-
         return self._calculate_battery_level(
-            sum(reading[0] for reading in self._battery_readings) / count,
-            sum(reading[1] for reading in self._battery_readings) / count,
+            *self._battery_readings.add(voltage, current),
         )
 
     def _calculate_battery_level(self, voltage: float, current: float = 0.0) -> int:
-        """Calculate Battery Level.
-
-        The battery voltage sags under load by roughly current x internal
-        resistance, so that is added back to estimate the resting voltage.
-        Charging current is negative, so the rise while charging is taken off.
-        A resistance of 0 leaves the voltage as measured.
-
-        The resting voltage is then turned into a level using `battery.curve`
-        when it is configured, as a Li-ion battery's voltage isn't linear with
-        its charge. Otherwise a straight line between the minimum and maximum
-        voltage is used.
-        """
+        """Work out the battery level with the settings in use."""
         battery_configuration = self._static_configuration.get("battery", {})
-        internal_resistance = float(
-            battery_configuration.get(
-                "internal_resistance",
-                DEFAULT_BATTERY_INTERNAL_RESISTANCE,
-            ),
-        )
-        resting_voltage = voltage + current / 1000 * internal_resistance / 1000
-
-        curve = battery_configuration.get("curve")
-        if curve:
-            return round(self._interpolate_battery_curve(curve, resting_voltage))
-
-        return self._calculate_linear_battery_level(resting_voltage)
-
-    @staticmethod
-    def _interpolate_battery_curve(curve: list[list[float]], voltage: float) -> float:
-        """Interpolate the battery level between the points of the curve.
-
-        The curve is checked at start up to have rising voltages, so it can be
-        walked in order. Voltages outside it are clamped to its ends.
-        """
-        if voltage <= curve[0][0]:
-            return curve[0][1]
-
-        for lower, upper in pairwise(curve):
-            lower_voltage, lower_level = lower
-            upper_voltage, upper_level = upper
-            if voltage <= upper_voltage:
-                return lower_level + (voltage - lower_voltage) / (
-                    upper_voltage - lower_voltage
-                ) * (upper_level - lower_level)
-
-        return curve[-1][1]
-
-    def _calculate_linear_battery_level(self, voltage: float) -> int:
-        """Calculate the battery level on a straight line between two voltages.
-
-        Subtracting DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP from the ceiling
-        prevents the level from reaching 100% while the battery is still under
-        load (voltage sags slightly even when fully charged).  min/max clamp
-        the result to [0, 100] so transient out-of-range readings are safe.
-
-        If the configured minimum is not below the maximum the scale would be
-        inverted and the level could never reach 0%, so low battery shutdown
-        would never happen. In that case the default voltages are used instead.
-        """
-        voltage_minimum = self.data.battery_voltage_minimum
-        voltage_maximum = self.data.battery_voltage_maximum
-        if voltage_maximum - DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP <= voltage_minimum:
-            self.logger.error(
-                "Battery voltage minimum %fV is not below maximum %fV, "
-                "using the default %fV to %fV instead",
-                voltage_minimum,
-                voltage_maximum,
-                DEFAULT_BATTERY_VOLTAGE_MINIMUM,
-                DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
-            )
-            voltage_minimum = DEFAULT_BATTERY_VOLTAGE_MINIMUM
-            voltage_maximum = DEFAULT_BATTERY_VOLTAGE_MAXIMUM
-
-        return int(
-            max(
-                min(
-                    100,
-                    (voltage - voltage_minimum)
-                    / (
-                        voltage_maximum
-                        - DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP
-                        - voltage_minimum
-                    )
-                    * 100,
+        return battery.battery_level(
+            voltage,
+            current,
+            internal_resistance=float(
+                battery_configuration.get(
+                    "internal_resistance",
+                    DEFAULT_BATTERY_INTERNAL_RESISTANCE,
                 ),
-                0,
             ),
+            curve=battery_configuration.get("curve"),
+            minimum=self.data.battery_voltage_minimum,
+            maximum=self.data.battery_voltage_maximum,
         )
 
     def _calculate_battery_time_remaining(self) -> float | None:
-        """Estimate the days left on battery before the low battery shutdown.
-
-        The charge left above the shutdown level, taken from the battery
-        capacity and the voltage based battery level, divided by the current
-        being drawn. The battery level is not linear with charge and the
-        current changes with load, so this is a rough guide only.
-
-        Returns None (unknown in Home Assistant) when the capacity isn't set,
-        or when there is external power so the battery isn't discharging.
-        """
-        if (
-            self.data.battery_capacity <= 0
-            or self.data.external_power
-            or self.data.current <= 0
-        ):
-            return None
-
-        usable_percentage = max(
-            self.data.battery_level - self.data.battery_warning_threshold,
-            0,
+        """Estimate the days left on battery before the low battery shutdown."""
+        return battery.time_remaining(
+            capacity=self.data.battery_capacity,
+            level=self.data.battery_level,
+            shutdown_level=self.data.battery_warning_threshold,
+            current=self.data.current,
+            external_power=self.data.external_power,
         )
-        remaining_mah = self.data.battery_capacity * usable_percentage / 100
-
-        return round(remaining_mah / self.data.current / HOURS_PER_DAY, 3)
 
     def _update_cpu_information(self) -> None:
         """Update CPU information, including temperature and throttling."""
@@ -722,18 +640,10 @@ class Monitor:
             # Throttled state
             self.data.cpu_stat_raw = read_cpu_stat()
 
-            # Decode text
-            self.data.cpu_stat_text = (
-                decode_cpu_stat_text(self.data.cpu_stat_raw)
-                if self.data.cpu_stat_raw is not None
-                else "Error"
-            )
-
         except Exception:
             self.logger.exception("Failed to read CPU Information")
             self.data.cpu_temperature = None
             self.data.cpu_stat_raw = None
-            self.data.cpu_stat_text = None
 
     def stop(self) -> None:
         """Stop reading and publishing, before a shutdown or restart.
@@ -782,7 +692,6 @@ class Monitor:
     def _state_payload(self) -> dict[str, Any]:
         """Return the state message, keyed by each field's configured name."""
         fields = self._static_configuration["fields"]
-        last_shutdown = self.data.last_shutdown or {}
         values: dict[str, Any] = {
             "voltage": round(self.data.voltage, 3),
             "current": published_current(self.data.current),
@@ -799,25 +708,14 @@ class Monitor:
                 UNDER_VOLTAGE_MASK,
             ),
             "throttled": self._cpu_stat_payload("throttled", THROTTLED_MASK),
-            "cpu_stat_text": self.data.cpu_stat_text,
             "battery_warning_threshold": self.data.battery_warning_threshold,
             "battery_voltage_minimum": self.data.battery_voltage_minimum,
             "battery_voltage_maximum": self.data.battery_voltage_maximum,
             "report_interval": self.data.report_interval,
             "battery_capacity": self.data.battery_capacity,
             "battery_time_remaining": self.data.battery_time_remaining,
-            "monitor_interval": self.data.monitor_interval,
-            "average_readings": self.data.average_readings,
-            "shutdown_readings": self.data.shutdown_readings,
-            "sensor_problem": binary_payload(
-                fields["sensor_problem"],
-                self.data.sensor_problem,
-            ),
-            "last_shutdown": last_shutdown.get("reason"),
-            "last_shutdown_time": last_shutdown.get("time"),
-            "last_shutdown_voltage": last_shutdown.get("voltage"),
         }
-        if self.data.sensor_problem:
+        if self._sensor_problem:
             # The INA219 can't be read, so these would be the last good values
             for key in (
                 "voltage",
@@ -858,18 +756,6 @@ class Monitor:
             # Apply the new report interval straight away, rather than after
             # the tick that is already waiting on the old interval
             self.report_timer.set_interval(self.data.report_interval)
-
-        # Created after the first call, once the INA219 is set up
-        monitor_timer: RepeatTimer | None = getattr(self, "monitor_timer", None)
-        if monitor_timer is not None:
-            monitor_timer.set_interval(self.data.monitor_interval)
-
-        if self._battery_readings.maxlen != self.data.average_readings:
-            # Keeps the most recent readings that still fit
-            self._battery_readings = deque(
-                self._battery_readings,
-                maxlen=self.data.average_readings,
-            )
 
     def _mqtt_on_connect(
         self,

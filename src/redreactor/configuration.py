@@ -32,10 +32,12 @@ from redreactor.const import (
     DEFAULT_INA_MAX_EXPECTED_AMPS,
     DEFAULT_INA_MONITOR_INTERVAL,
     DEFAULT_INA_SHUNT_OHMS,
+    DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS,
     DYNAMIC_SETTINGS,
     INA_ADC_SAMPLES,
-    POWER_EVENT_TYPES,
+    SHUTDOWN_READINGS_MAXIMUM,
 )
+from redreactor.fields import default_fields
 from redreactor.helpers.emitter import EventEmitter
 from redreactor.helpers.utils import dict_merge
 
@@ -92,6 +94,7 @@ def _convert_quoted_values(configuration: dict[str, Any]) -> None:
         ("ina", "adc_samples"),
         ("battery", "internal_resistance"),
         ("battery", "average_readings"),
+        ("battery", "shutdown_readings"),
         ("battery", "report_level_change"),
     ):
         value = configuration[section][key]
@@ -273,6 +276,15 @@ def _validate_static(configuration: dict[str, Any]) -> list[str]:  # noqa: C901
         f"must be a whole number from 1 to {BATTERY_AVERAGE_READINGS_MAXIMUM}",
     )
     check(
+        "battery.shutdown_readings",
+        not isinstance(configuration["battery"]["shutdown_readings"], bool)
+        and isinstance(configuration["battery"]["shutdown_readings"], int)
+        and 1
+        <= configuration["battery"]["shutdown_readings"]
+        <= SHUTDOWN_READINGS_MAXIMUM,
+        f"must be a whole number from 1 to {SHUTDOWN_READINGS_MAXIMUM}",
+    )
+    check(
         "battery.report_level_change",
         _is_number(configuration["battery"]["report_level_change"])
         and 0
@@ -328,12 +340,18 @@ def _validate_static(configuration: dict[str, Any]) -> list[str]:  # noqa: C901
     )
 
     # Checked here, a command that can't be split would otherwise only fail
-    # once the battery is already low
+    # once the battery is already low. Empty is filled in automatically.
     for path, value in (
         ("system.shutdown", configuration["system"]["shutdown"]),
         ("system.restart", configuration["system"]["restart"]),
     ):
-        check(path, _is_command(value), "must be a command")
+        check(
+            path,
+            value is None
+            or (isinstance(value, str) and not value.strip())
+            or _is_command(value),
+            "must be a command, or empty to choose one automatically",
+        )
 
     return errors
 
@@ -444,22 +462,14 @@ class DynamicConfiguration:
         self,
         dynamic_file: str,
         fields: dict[str, Any] | None = None,
-        static_defaults: dict[str, Any] | None = None,
     ) -> None:
         """Initialise the Dynamic Configuration object.
 
         `fields` is the static field configuration, used to range check the
         stored values against each number's `min` and `max`.
-
-        `static_defaults` are settings whose default comes from the static
-        configuration, such as the monitor interval. They are only saved while
-        they differ from it, so a change to the static file still applies until
-        the setting is changed from MQTT, and setting it back to the static
-        value hands it back to the static file.
         """
         self._dynamic_file = dynamic_file
         self._fields = fields or {}
-        self._static_defaults = static_defaults or {}
         self.event = EventEmitter()
 
         self.data = self._load()
@@ -472,7 +482,7 @@ class DynamicConfiguration:
         """Load dynamic configuration file."""
         dynamic_file_defaults: dict[str, Any] = {
             key: default for key, (_, default) in DYNAMIC_SETTINGS.items()
-        } | self._static_defaults
+        }
 
         dynamic_path = Path(self._dynamic_file)
         dynamic_file_override: Any = {}
@@ -482,7 +492,7 @@ class DynamicConfiguration:
             # must not stop the service
             try:
                 with dynamic_path.open("w") as file:
-                    json.dump(self._saved(dynamic_file_defaults), file)
+                    json.dump(dynamic_file_defaults, file)
             except OSError as error:
                 logger.warning(
                     "Unable to create %s (%s), using the default settings, "
@@ -517,17 +527,13 @@ class DynamicConfiguration:
         # report interval of 0 or less would spin the report timer, and a
         # negative capacity is meaningless.
         for key, default in dynamic_file_defaults.items():
-            if key in self._static_defaults and key not in dynamic_file_override:
-                # Checked with the static configuration already
-                continue
             value = data[key]
             field = self._fields.get(key) or {}
             minimum = field.get("min")
             maximum = field.get("max")
             if (
                 not _is_number(value)
-                or (key in {"report_interval", "monitor_interval"} and value <= 0)
-                or (key in {"average_readings", "shutdown_readings"} and value < 1)
+                or (key == "report_interval" and value <= 0)
                 or (key == "battery_capacity" and value < 0)
                 # The same range a value received over MQTT is checked against
                 or (_is_number(minimum) and value < minimum)
@@ -559,14 +565,6 @@ class DynamicConfiguration:
 
         return data
 
-    def _saved(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Return the settings to save, leaving out unchanged static defaults."""
-        return {
-            key: value
-            for key, value in data.items()
-            if key not in self._static_defaults or value != self._static_defaults[key]
-        }
-
     def write(self) -> None:
         """Write dynamic configuration file.
 
@@ -577,7 +575,7 @@ class DynamicConfiguration:
         temporary_path = dynamic_path.with_name(f"{dynamic_path.name}.tmp")
         try:
             with temporary_path.open("w") as file:
-                json.dump(self._saved(self.data), file)
+                json.dump(self.data, file)
                 file.flush()
                 os.fsync(file.fileno())
             temporary_path.replace(dynamic_path)
@@ -613,10 +611,6 @@ class LinkedConfiguration:
         self.dynamic = DynamicConfiguration(
             self._dynamic_file,
             self.static["fields"],
-            static_defaults={
-                "monitor_interval": self.static["ina"]["monitor_interval"],
-                "average_readings": self.static["battery"]["average_readings"],
-            },
         )
 
     def _load(self) -> dict[str, Any]:
@@ -675,260 +669,7 @@ class LinkedConfiguration:
                 "online": "online",
                 "offline": "offline",
             },
-            "fields": {
-                "voltage": {
-                    "name": "voltage",
-                    "pretty": "Voltage",
-                    "type": "sensor",
-                    "unit": "V",
-                    "device_class": "voltage",
-                    "suggested_display_precision": 2,
-                },
-                "current": {
-                    "name": "current",
-                    "pretty": "Current",
-                    "type": "sensor",
-                    "unit": "mA",
-                    "device_class": "current",
-                    "suggested_display_precision": 2,
-                },
-                "power": {
-                    "name": "power",
-                    "pretty": "Power",
-                    "type": "sensor",
-                    "unit": "W",
-                    "device_class": "power",
-                    "suggested_display_precision": 2,
-                },
-                "battery_level": {
-                    "name": "battery_level",
-                    "pretty": "Battery level",
-                    "type": "sensor",
-                    "unit": "%",
-                    "device_class": "battery",
-                },
-                "external_power": {
-                    "name": "external_power",
-                    "pretty": "External power",
-                    "type": "binary_sensor",
-                    "device_class": "plug",
-                    "entity_category": "diagnostic",
-                },
-                "charging": {
-                    "name": "charging",
-                    "pretty": "Charging",
-                    "type": "binary_sensor",
-                    "device_class": "battery_charging",
-                    "entity_category": "diagnostic",
-                },
-                "cpu_temperature": {
-                    "name": "cpu_temperature",
-                    "pretty": "CPU temperature",
-                    "type": "sensor",
-                    "unit": "°C",
-                    "device_class": "temperature",
-                    "entity_category": "diagnostic",
-                    "suggested_display_precision": 2,
-                },
-                "under_voltage": {
-                    "name": "under_voltage",
-                    "pretty": "Under-voltage",
-                    "type": "binary_sensor",
-                    "device_class": "problem",
-                    "entity_category": "diagnostic",
-                },
-                "throttled": {
-                    "name": "throttled",
-                    "pretty": "Throttled",
-                    "type": "binary_sensor",
-                    "device_class": "problem",
-                    "entity_category": "diagnostic",
-                },
-                "cpu_stat_text": {
-                    "name": "cpu_stat",
-                    "pretty": "CPU stat",
-                    "type": "sensor",
-                    "entity_category": "diagnostic",
-                    "state_class": None,
-                },
-                "battery_warning_threshold": {
-                    "name": "battery_warning_threshold",
-                    "pretty": "Battery shutdown level",
-                    "type": "number",
-                    "unit": "%",
-                    "device_class": "battery",
-                    "entity_category": "diagnostic",
-                    "min": 0,
-                    "max": 100,
-                    "mode": "box",
-                    "step": 1,
-                },
-                "battery_voltage_minimum": {
-                    "name": "battery_voltage_minimum",
-                    "pretty": "Battery voltage minimum",
-                    "type": "number",
-                    "unit": "V",
-                    "device_class": "voltage",
-                    "entity_category": "diagnostic",
-                    "min": 2.5,
-                    "max": 4.5,
-                    "mode": "box",
-                    "step": 0.1,
-                },
-                "battery_voltage_maximum": {
-                    "name": "battery_voltage_maximum",
-                    "pretty": "Battery voltage maximum",
-                    "type": "number",
-                    "unit": "V",
-                    "device_class": "voltage",
-                    "entity_category": "diagnostic",
-                    "min": 2.5,
-                    "max": 4.5,
-                    "mode": "box",
-                    "step": 0.1,
-                },
-                "report_interval": {
-                    "name": "report_interval",
-                    "pretty": "Report interval",
-                    "type": "number",
-                    "unit": "s",
-                    "entity_category": "diagnostic",
-                    "min": 5,
-                    "max": 300,
-                    "mode": "box",
-                    "step": 5,
-                },
-                "battery_capacity": {
-                    "name": "battery_capacity",
-                    "pretty": "Battery capacity",
-                    "type": "number",
-                    "unit": "mAh",
-                    "entity_category": "diagnostic",
-                    "min": 0,
-                    "max": 20000,
-                    "mode": "box",
-                    "step": 1,
-                },
-                "monitor_interval": {
-                    "name": "monitor_interval",
-                    # Hidden until enabled in Home Assistant, to keep the device
-                    # page short
-                    "enabled_by_default": False,
-                    "pretty": "Monitor interval",
-                    "type": "number",
-                    "unit": "s",
-                    "entity_category": "diagnostic",
-                    "min": 0.5,
-                    "max": 300,
-                    "mode": "box",
-                    "step": 0.5,
-                },
-                "average_readings": {
-                    "name": "average_readings",
-                    # Hidden until enabled in Home Assistant, to keep the device
-                    # page short
-                    "enabled_by_default": False,
-                    "pretty": "Readings averaged",
-                    "type": "number",
-                    "entity_category": "diagnostic",
-                    "min": 1,
-                    "max": BATTERY_AVERAGE_READINGS_MAXIMUM,
-                    "mode": "box",
-                    "step": 1,
-                },
-                "shutdown_readings": {
-                    "name": "shutdown_readings",
-                    # Hidden until enabled in Home Assistant, to keep the device
-                    # page short
-                    "enabled_by_default": False,
-                    "pretty": "Shutdown confirmation readings",
-                    "type": "number",
-                    "entity_category": "diagnostic",
-                    "min": 1,
-                    "max": 20,
-                    "mode": "box",
-                    "step": 1,
-                },
-                "battery_time_remaining": {
-                    "name": "battery_time_remaining",
-                    "pretty": "Battery time remaining",
-                    "type": "sensor",
-                    "unit": "d",
-                    "device_class": "duration",
-                    "suggested_display_precision": 1,
-                },
-                "sensor_problem": {
-                    "name": "sensor_problem",
-                    # Hidden until enabled in Home Assistant, to keep the device
-                    # page short
-                    "enabled_by_default": False,
-                    "pretty": "Sensor problem",
-                    "type": "binary_sensor",
-                    "device_class": "problem",
-                    "entity_category": "diagnostic",
-                },
-                "last_shutdown": {
-                    "name": "last_shutdown",
-                    # Hidden until enabled in Home Assistant, to keep the device
-                    # page short
-                    "enabled_by_default": False,
-                    "pretty": "Last shutdown",
-                    "type": "sensor",
-                    "entity_category": "diagnostic",
-                    "state_class": None,
-                },
-                "last_shutdown_time": {
-                    "name": "last_shutdown_time",
-                    # Hidden until enabled in Home Assistant, to keep the device
-                    # page short
-                    "enabled_by_default": False,
-                    "pretty": "Last shutdown time",
-                    "type": "sensor",
-                    "device_class": "timestamp",
-                    "entity_category": "diagnostic",
-                    "state_class": None,
-                },
-                "last_shutdown_voltage": {
-                    "name": "last_shutdown_voltage",
-                    # Hidden until enabled in Home Assistant, to keep the device
-                    # page short
-                    "enabled_by_default": False,
-                    "pretty": "Last shutdown voltage",
-                    "type": "sensor",
-                    "unit": "V",
-                    "device_class": "voltage",
-                    "entity_category": "diagnostic",
-                    "state_class": None,
-                    "suggested_display_precision": 2,
-                },
-                "power_event": {
-                    "name": "power_event",
-                    "pretty": "Power event",
-                    "type": "event",
-                    "event_types": list(POWER_EVENT_TYPES),
-                },
-                "restart": {
-                    "name": "restart",
-                    "pretty": "Restart",
-                    "type": "button",
-                    "entity_category": "diagnostic",
-                },
-                "shutdown": {
-                    "name": "shutdown",
-                    "pretty": "Shutdown",
-                    "type": "button",
-                    "entity_category": "diagnostic",
-                },
-                "refresh": {
-                    "name": "refresh",
-                    # Hidden until enabled in Home Assistant, to keep the device
-                    # page short
-                    "enabled_by_default": False,
-                    "pretty": "Refresh",
-                    "type": "button",
-                    "entity_category": "diagnostic",
-                },
-            },
+            "fields": default_fields(),
             "ina": {
                 "address": DEFAULT_INA_I2C_ADDRESS,
                 "shunt_ohms": DEFAULT_INA_SHUNT_OHMS,
@@ -944,6 +685,9 @@ class LinkedConfiguration:
                 "internal_resistance": DEFAULT_BATTERY_INTERNAL_RESISTANCE,
                 # Monitor readings averaged for the battery level, 1 turns it off
                 "average_readings": DEFAULT_BATTERY_AVERAGE_READINGS,
+                # Readings in a row at or below the shutdown level needed
+                # before shutting down, so a brief sag can't power it off
+                "shutdown_readings": DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS,
                 # Pairs of [resting voltage, battery level %], None uses a
                 # straight line between the minimum and maximum voltage
                 "curve": None,
@@ -952,8 +696,11 @@ class LinkedConfiguration:
                 "report_level_change": DEFAULT_BATTERY_REPORT_LEVEL_CHANGE,
             },
             "system": {
-                "shutdown": "sudo shutdown 0 -h",
-                "restart": "sudo shutdown 0 -r",
+                # Empty chooses automatically: the Supervisor API under Home
+                # Assistant, otherwise `shutdown 0 -h` or `-r`, through sudo
+                # unless running as root (see helpers/power.py)
+                "shutdown": "",
+                "restart": "",
             },
             "logging": {
                 "console": "INFO",

@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from redreactor.components.monitor.data import MonitorData
 from redreactor.helpers.emitter import EventEmitter
 
 # ---------------------------------------------------------------------------
@@ -45,7 +44,6 @@ def commander(static_config, dynamic_config):
 
     mock_monitor = MagicMock()
     mock_monitor.event = Monitor.event  # Use the class-level emitter
-    mock_monitor.data = MonitorData(voltage=3.25, battery_level=4)
 
     cmd = Commander(
         static_configuration=static_config,
@@ -105,7 +103,7 @@ def test_on_message_button_calls_on_command(commander, static_config):
             if thread.name == "redreactor-shutdown":
                 thread.join(timeout=5)
 
-    mock_cmd.assert_called_once_with(event_type="shutdown", reason="Shutdown button")
+    mock_cmd.assert_called_once_with(event_type="shutdown")
 
 
 def test_on_message_button_runs_off_the_mqtt_thread(commander, static_config):
@@ -125,10 +123,7 @@ def test_on_message_button_runs_off_the_mqtt_thread(commander, static_config):
     mock_cmd.assert_not_called()
     mock_thread.assert_called_once()
     assert mock_thread.call_args.kwargs["target"] is mock_cmd
-    assert mock_thread.call_args.kwargs["kwargs"] == {
-        "event_type": "restart",
-        "reason": "Restart button",
-    }
+    assert mock_thread.call_args.kwargs["kwargs"] == {"event_type": "restart"}
     mock_thread.return_value.start.assert_called_once()
 
 
@@ -172,7 +167,7 @@ def test_on_message_number_rejects_non_numbers(commander, static_config, payload
 
     _send_number(cmd, static_config, "report_interval", payload)
 
-    assert cmd._dynamic_configuration.data["report_interval"] == 30
+    assert cmd._dynamic_configuration.data["report_interval"] == 60
     assert not written
 
 
@@ -407,7 +402,7 @@ def test_on_message_requires_exact_field_name(commander, static_config):
     with patch.object(cmd.logger, "warning") as mock_warn:
         _send_number(cmd, static_config, "report_interval_extra", "60")
 
-    assert cmd._dynamic_configuration.data["report_interval"] == 30
+    assert cmd._dynamic_configuration.data["report_interval"] == 60
     mock_warn.assert_called_once()
 
 
@@ -526,27 +521,39 @@ def test_on_message_deeply_nested_json_is_ignored(commander, static_config):
         cmd._on_message(None, None, _make_mock_message(topic, "[[]]"))
 
     assert "not valid JSON" in mock_warn.call_args.args[0]
-    assert cmd._dynamic_configuration.data["report_interval"] == 30
+    assert cmd._dynamic_configuration.data["report_interval"] == 60
 
 
-def test_on_command_unsplittable_command_still_disconnects(commander, static_config):
+def test_on_command_unsplittable_command_still_disconnects(
+    commander,
+    static_config,
+    dynamic_config,
+):
     """A command shlex can't split is logged, and the service still exits.
 
     The readings are already stopped by then, so carrying on would leave the
     service running but doing nothing.
     """
-    cmd, _ = commander
+    _, monitor = commander
+    from redreactor.components.commander.commander import Commander
     from redreactor.components.mqtt import MQTT
 
     static_config["system"]["shutdown"] = "echo 'unbalanced"
+    cmd = Commander(static_config, dynamic_config, monitor)
     MQTT.event.on("publish", lambda **_: None)
     disconnect_calls: list[bool] = []
     MQTT.event.on("disconnect", lambda: disconnect_calls.append(True))
 
-    with patch("time.sleep"), patch.object(cmd.logger, "exception") as mock_exc:
+    target = "redreactor.components.commander.commander.subprocess.run"
+    with (
+        patch("time.sleep"),
+        patch(target) as mock_run,
+        patch.object(cmd.logger, "error") as mock_error,
+    ):
         cmd._on_command("shutdown")
 
-    mock_exc.assert_called_once()
+    mock_run.assert_not_called()
+    assert "can't be split" in mock_error.call_args.args[0]
     assert disconnect_calls == [True]
 
 
@@ -579,82 +586,109 @@ def test_on_command_hanging_command_times_out(commander):
 
 
 # ---------------------------------------------------------------------------
-# Refresh button and the last shutdown
+# Home Assistant Supervisor
 # ---------------------------------------------------------------------------
 
 
-def test_refresh_button_takes_a_reading(commander):
-    """The refresh button runs the monitor's refresh, off the MQTT thread."""
-    cmd, mock_monitor = commander
-    topic = "redreactor/redreactor/set/refresh"
-
-    target = "redreactor.components.commander.commander.threading.Thread"
-    with patch(target) as mock_thread, patch.object(cmd, "_on_command") as mock_cmd:
-        cmd._on_message(None, None, _make_mock_message(topic, json.dumps("PRESS")))
-
-    mock_cmd.assert_not_called()
-    assert mock_thread.call_args.kwargs["target"] is mock_monitor.refresh
-    assert mock_thread.call_args.kwargs["kwargs"] == {}
-    mock_thread.return_value.start.assert_called_once()
-
-
 @pytest.mark.parametrize(
-    ("event_type", "reason", "trigger"),
+    ("event_type", "command", "action"),
     [
-        ("shutdown", "Low battery", "low battery"),
-        ("shutdown", "Shutdown button", "shutdown"),
-        ("restart", "Restart button", "restart"),
+        ("shutdown", "ha host shutdown", "shutdown"),
+        ("restart", "ha host restart", "reboot"),
+        ("restart", "ha host reboot", "reboot"),
     ],
 )
-def test_last_shutdown_is_saved_before_the_command(
-    commander,
-    tmp_path,
+def test_supervisor_host_command_uses_the_api(  # noqa: PLR0913, PLR0917
+    static_config,
+    dynamic_config,
+    monkeypatch,
     event_type,
-    reason,
-    trigger,
+    command,
+    action,
 ):
-    """The reason, voltage and time are saved before the command runs."""
+    """Under the Supervisor an `ha host` command goes to its API, not the CLI."""
+    from redreactor.components.commander.commander import Commander
+    from redreactor.components.mqtt import MQTT
+
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "secret")
+    static_config["system"][event_type] = command
+    cmd = Commander(static_config, dynamic_config, MagicMock())
+    MQTT.event.on("publish", lambda **_: None)
+
+    module = "redreactor.components.commander.commander"
+    with (
+        patch(f"{module}.subprocess.run") as mock_run,
+        patch(f"{module}.supervisor.call_host_action") as mock_call,
+        patch("time.sleep"),
+    ):
+        cmd._on_command(event_type)
+
+    mock_call.assert_called_once_with(action, "secret", 60)
+    mock_run.assert_not_called()
+
+
+def test_other_commands_run_under_the_supervisor(commander, monkeypatch):
+    """A command that isn't `ha host` is run as configured."""
     cmd, _ = commander
-    saved: list[dict] = []
+    from redreactor.components.mqtt import MQTT
 
-    def run(*_args: object, **_kwargs: object) -> MagicMock:
-        # Read back from the file, as nothing runs after a shutdown
-        saved.append(json.loads((tmp_path / "dynamic.json").read_text()))
-        return MagicMock(returncode=0)
+    MQTT.event.on("publish", lambda **_: None)
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "secret")
 
-    target = "redreactor.components.commander.commander.subprocess.run"
-    with patch(target, side_effect=run), patch("time.sleep"):
-        if trigger == "low battery":
-            cmd._shutdown()
-        elif trigger == "shutdown":
-            cmd._on_message(
-                None,
-                None,
-                _make_mock_message("redreactor/redreactor/set/shutdown", "true"),
-            )
-            for thread in threading.enumerate():
-                if thread.name == "redreactor-shutdown":
-                    thread.join(timeout=5)
-        else:
-            cmd._on_command(event_type, reason=reason)
-
-    last_shutdown = saved[0]["last_shutdown"]
-    assert last_shutdown["reason"] == reason
-    assert last_shutdown["action"] == event_type
-    assert last_shutdown["voltage"] == 3.25
-    assert last_shutdown["battery_level"] == 4
-    assert last_shutdown["time"].endswith("+00:00")
-
-
-def test_last_shutdown_has_no_reading_with_a_sensor_problem(commander, tmp_path):
-    """The voltage isn't saved when the INA219 can't be read."""
-    cmd, mock_monitor = commander
-    mock_monitor.data.sensor_problem = True
-
-    target = "redreactor.components.commander.commander.subprocess.run"
-    with patch(target), patch("time.sleep"):
+    module = "redreactor.components.commander.commander"
+    with (
+        patch(f"{module}.subprocess.run") as mock_run,
+        patch(f"{module}.supervisor.call_host_action") as mock_call,
+        patch("time.sleep"),
+    ):
+        mock_run.return_value.returncode = 0
         cmd._on_command("shutdown")
 
-    last_shutdown = json.loads((tmp_path / "dynamic.json").read_text())["last_shutdown"]
-    assert last_shutdown["voltage"] is None
-    assert last_shutdown["battery_level"] is None
+    mock_call.assert_not_called()
+    assert mock_run.call_args.args[0] == ["sudo", "shutdown", "0", "-h"]
+
+
+def test_ha_host_command_runs_without_the_supervisor(
+    static_config,
+    dynamic_config,
+    monkeypatch,
+):
+    """Without a Supervisor token the `ha` command is run as configured."""
+    from redreactor.components.commander.commander import Commander
+    from redreactor.components.mqtt import MQTT
+
+    monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
+    static_config["system"]["shutdown"] = "ha host shutdown"
+    cmd = Commander(static_config, dynamic_config, MagicMock())
+    MQTT.event.on("publish", lambda **_: None)
+
+    module = "redreactor.components.commander.commander"
+    with (
+        patch(f"{module}.subprocess.run") as mock_run,
+        patch(f"{module}.supervisor.call_host_action") as mock_call,
+        patch("time.sleep"),
+    ):
+        mock_run.return_value.returncode = 0
+        cmd._on_command("shutdown")
+
+    mock_call.assert_not_called()
+    assert mock_run.call_args.args[0] == ["ha", "host", "shutdown"]
+
+
+def test_start_up_logs_the_power_methods(static_config, dynamic_config, monkeypatch):
+    """The shutdown and restart methods in use are logged at start up."""
+    from redreactor.components.commander.commander import Commander
+
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "secret")
+    static_config["system"]["shutdown"] = ""
+    static_config["system"]["restart"] = "sudo shutdown 0 -r"
+
+    with patch.object(Commander.logger, "info") as mock_info:
+        Commander(static_config, dynamic_config, MagicMock())
+
+    lines = [call.args[0] % call.args[1:] for call in mock_info.call_args_list]
+    assert (
+        "The shutdown will use the Supervisor API (POST /host/shutdown), "
+        "chosen automatically"
+    ) in lines
+    assert "The restart will use `sudo shutdown 0 -r`" in lines

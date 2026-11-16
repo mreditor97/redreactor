@@ -457,29 +457,3 @@ def read_cpu_stat() -> int | None:
             read_cpu_stat_inferred,
         ),
     )
-
-
-def decode_cpu_stat_text(value: int) -> str:
-    """Convert throttling bitmask to human-friendly text."""
-    messages = []
-
-    if value & (1 << UNDER_VOLTAGE_BIT):
-        messages.append("Under-voltage NOW")
-    if value & (1 << FREQ_CAPPED_BIT):
-        messages.append("Frequency capped NOW")
-    if value & (1 << THROTTLED_BIT):
-        messages.append("Throttled NOW")
-    if value & (1 << SOFT_TEMP_LIMIT_BIT):
-        messages.append("Soft temp limit NOW")
-
-    # +16 accesses the sticky "has occurred since boot" history flags.
-    if value & (1 << (UNDER_VOLTAGE_BIT + 16)):
-        messages.append("Under-voltage OCCURRED")
-    if value & (1 << (FREQ_CAPPED_BIT + 16)):
-        messages.append("Frequency capped OCCURRED")
-    if value & (1 << (THROTTLED_BIT + 16)):
-        messages.append("Throttling OCCURRED")
-    if value & (1 << (SOFT_TEMP_LIMIT_BIT + 16)):
-        messages.append("Soft temp limit OCCURRED")
-
-    return ", ".join(messages) if messages else "OK"

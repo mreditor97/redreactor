@@ -38,6 +38,24 @@ if TYPE_CHECKING:
 REMOVED_ENTITIES = (
     # Replaced by the under-voltage and throttled binary sensors
     ("sensor", "cpu_stat_raw"),
+    ("sensor", "cpu_stat"),
+)
+
+# (entity type, field name) of entities earlier device discovery messages held
+# that have since been removed. They are sent with only their platform, which
+# deletes them from Home Assistant, followed by the usual discovery message.
+REMOVED_COMPONENTS = (
+    # Repeated what the under-voltage and throttled binary sensors show
+    ("sensor", "cpu_stat"),
+    # Only ever in edge builds, these settings are in the configuration file
+    ("number", "monitor_interval"),
+    ("number", "average_readings"),
+    ("number", "shutdown_readings"),
+    ("binary_sensor", "sensor_problem"),
+    ("sensor", "last_shutdown"),
+    ("sensor", "last_shutdown_time"),
+    ("sensor", "last_shutdown_voltage"),
+    ("button", "refresh"),
 )
 
 
@@ -357,11 +375,15 @@ class Homeassistant:
             "components": components,
         }
 
-    def _update_homeassistant_configuration(self) -> None:
+    def _update_homeassistant_configuration(self, *, remove_old: bool = False) -> None:
         """Push Home Assistant configuration for auto discovery.
 
         The first time, the entities are first moved over from the older one
-        message per entity discovery (see `_migrate_discovery`).
+        message per entity discovery (see `_migrate_discovery`). With
+        `remove_old`, used when connecting and when Home Assistant comes
+        online, entities removed from the device discovery are deleted first.
+        The discovery message isn't retained, so those are the times Home
+        Assistant is listening.
         """
         with self._migration_lock:
             migrate = not self._migrated
@@ -371,7 +393,32 @@ class Homeassistant:
             self._migrate_discovery()
             return
 
+        if remove_old:
+            self._remove_old_components()
         self._publish_device_discovery()
+
+    def _remove_old_components(self) -> None:
+        """Delete entities that earlier device discovery messages held.
+
+        Home Assistant deletes a component sent with only its platform. A
+        field configured again under the same name is left alone.
+        """
+        configured = {str(field.component_id) for field in self.configuration}
+        removed = {
+            name: {"platform": entity_type}
+            for entity_type, name in REMOVED_COMPONENTS
+            if name not in configured
+        }
+        if not removed:
+            return
+
+        payload = self._device_discovery_payload()
+        payload["components"] |= removed
+        MQTT.event.emit(
+            event_name="publish",
+            topic=self._device_discovery_topic,
+            payload=json.dumps(payload, cls=Encoder),
+        )
 
     def _publish_device_discovery(self) -> None:
         """Publish the device discovery message."""
@@ -467,7 +514,7 @@ class Homeassistant:
         _properties: Any = None,
     ) -> None:
         """On MQTT Connect, publish Home Assistant configuration."""
-        self._update_homeassistant_configuration()
+        self._update_homeassistant_configuration(remove_old=True)
         # 0 turns the repeat off, discovery is still sent on every connect and
         # when Home Assistant comes online
         if self.configuration_report_timer.interval > 0:
@@ -508,7 +555,7 @@ class Homeassistant:
             self.logger.info(
                 "Home Assistant is online, publishing discovery and latest readings",
             )
-            self._update_homeassistant_configuration()
+            self._update_homeassistant_configuration(remove_old=True)
 
             # The readings are retained, but they are sent again so Home
             # Assistant has fresh ones straight after it restarts. Wait briefly

@@ -18,22 +18,17 @@ Functionality includes:
   - External Power Status
   - Charging Status
   - CPU Temperature
-  - CPU Status
   - Under-voltage and Throttled problem states
   - Battery Warning Threshold
   - Battery Voltage Minimum and Maximum
   - Report Interval
-  - Monitor Interval, Readings Averaged and Shutdown Confirmation Readings
-  - Sensor Problem, when the INA219 can't be read
-  - Last Shutdown reason, time and voltage
 - Commands:
   - Immediate Shutdown
   - Immediate Restart
   - Change the Battery Warning Threshold
   - Change the Battery Voltage Minimum and Maximum
   - Change the Report Interval
-  - Change the Monitor Interval, Readings Averaged and Shutdown Confirmation Readings
-  - Refresh, to read and report straight away
+- Sends the readings as unknown when the INA219 can't be read, rather than the last good ones
 - Reports straight away when the battery level moves by `battery.report_level_change` points, or charging starts or stops
 - Power events (power lost, power restored, low battery, shutdown started) for automations
 - Optional TLS for the MQTT connection
@@ -47,7 +42,7 @@ If you haven't already got yourself a Red Reactor (An uninterruptible battery po
 
 Connecting your Home Assistant instance to the same MQTT Broker as your Red Reactor will allow your Red Reactor to be auto discovered by your Home Assistant instance. It will give you access to all the readings available from the Red Reactor sensors, and allows full configuration of the Red Reactor on the fly - it even adds the ability to reboot and shutdown your device at the push of a button.
 
-The Red Reactor uses Home Assistant's device discovery, one message on `homeassistant/device/redreactor_<hostname>/config` that holds every entity. Versions before this published one message per entity. On start it moves Home Assistant over using its migration steps, so existing entities keep their entity IDs, names and history. The old raw CPU stat sensor is removed, replaced by the Under-voltage and Throttled binary sensors. New entities get entity IDs from the device and field name, such as `sensor.red_reactor_pi_voltage`.
+The Red Reactor uses Home Assistant's device discovery, one message on `homeassistant/device/redreactor_<hostname>/config` that holds every entity. Versions before this published one message per entity. On start it moves Home Assistant over using its migration steps, so existing entities keep their entity IDs, names and history. The old CPU stat sensors are removed, replaced by the Under-voltage and Throttled binary sensors. Entities a newer version no longer publishes are deleted from Home Assistant when the service connects, and when Home Assistant comes online. New entities get entity IDs from the device and field name, such as `sensor.red_reactor_pi_voltage`.
 
 The Power event entity fires `power_lost`, `power_restored`, `low_battery` (the first reading at the battery shutdown level, on battery) and `shutdown_started` (a low battery or Shutdown button shutdown), so an automation can notify you without watching other entities.
 
@@ -70,22 +65,14 @@ Topic `redreactor/your-configured-hostname/state`
   "external_power": "ON",
   "charging": "OFF",
   "cpu_temperature": 49.1,
-  "cpu_stat": "OK",
   "under_voltage": "OFF",
   "throttled": "OFF",
   "battery_warning_threshold": 10,
   "battery_voltage_minimum": 2.6,
   "battery_voltage_maximum": 4.2,
-  "report_interval": 30,
+  "report_interval": 60,
   "battery_capacity": 3000,
-  "battery_time_remaining": null,
-  "monitor_interval": 5,
-  "average_readings": 6,
-  "shutdown_readings": 3,
-  "sensor_problem": "OFF",
-  "last_shutdown": "Low battery",
-  "last_shutdown_time": "2026-11-10T20:36:00+00:00",
-  "last_shutdown_voltage": 3.212
+  "battery_time_remaining": null
 }
 ```
 
@@ -98,19 +85,14 @@ Topic `redreactor/your-configured-hostname/state`
 - `external_power` is whether the batteries are connected to an external power source or not
 - `charging` is whether the batteries are currently being charged
 - `cpu_temperature` read via `cat /sys/class/thermal/thermal_zone0/temp` gets the CPU Temperature
-- `cpu_stat` read via `cat /sys/devices/platform/soc/soc:firmware/get_throttled` gets the CPU Stat in a human readable format
-- `under_voltage` is `ON` while the Raspberry Pi reports under-voltage now, from the same throttling state as `cpu_stat`. `null` when it can't be read
+- `under_voltage` is `ON` while the Raspberry Pi reports under-voltage now, from its throttling state (`/sys/devices/platform/soc/soc:firmware/get_throttled` or `vcgencmd get_throttled`). `null` when it can't be read
 - `throttled` is `ON` while the CPU is slowed down now: frequency capped, throttled, or at the soft temperature limit. `null` when it can't be read
-- `battery_warning_threshold` is the battery percentage at or below which, while running on battery, a safe shutdown of the device is started (after `shutdown_readings` consecutive readings, so a brief voltage dip doesn't trigger it). If the device starts up below this level while charging it stays on; without external power it shuts down again
+- `battery_warning_threshold` is the battery percentage at or below which, while running on battery, a safe shutdown of the device is started (after `battery.shutdown_readings` consecutive readings, so a brief voltage dip doesn't trigger it). If the device starts up below this level while charging it stays on; without external power it shuts down again
 - `battery_voltage_minimum` is the voltage at which is to be considered the lowest allowable before initiating a safe shutdown
 - `battery_voltage_maximum` is the voltage at which is to be considered the maximum at which the battery can be (this is used in the calculation of the `battery_level`)
-- `report_interval` is the reporting interval at which the data will be published onto the **state** topic
+- `report_interval` is the reporting interval at which the data will be published onto the **state** topic (default `60` seconds, an existing database file keeps the interval saved in it). Battery level and charging changes are sent straight away, see `battery.report_level_change`
 - `battery_capacity` is the total capacity of the batteries in mAh (with two cells in parallel, the sum of both), set it from Home Assistant or the command topic. `0` means not set
-- `monitor_interval` is the seconds between INA219 readings. Until it is changed from Home Assistant or the command topic it is `ina.monitor_interval` from the configuration file, and setting it back to that value hands it back to the file
-- `average_readings` is how many readings are averaged for `battery_level`, `battery.average_readings` from the configuration file until it is changed, like `monitor_interval`
-- `shutdown_readings` is how many readings in a row must be at or below `battery_warning_threshold`, on battery, before the shutdown starts (default `3`)
-- `sensor_problem` is `ON` after 3 INA219 reads in a row have failed (such as a loose connection). While it is on, `voltage`, `current`, `power`, `battery_level`, `external_power`, `charging` and `battery_time_remaining` are `null` (unknown in Home Assistant) rather than the last good readings. No low battery shutdown can happen while the battery can't be read
-- `last_shutdown` is why this service last shut down or restarted the device: `Low battery`, `Shutdown button` or `Restart button`. `last_shutdown_time` (UTC) and `last_shutdown_voltage` are when it happened and the battery voltage then. They are saved to the database file before the command runs, so a power cut or a shutdown from outside this service isn't recorded. `null` until the first one
+- After 3 INA219 reads in a row have failed (such as a loose connection), `voltage`, `current`, `power`, `battery_level`, `external_power`, `charging` and `battery_time_remaining` are `null` (unknown in Home Assistant) rather than the last good readings, until a read works again. No low battery shutdown can happen while the battery can't be read
 - `battery_time_remaining` is a rough estimate of the days left on battery before the low battery shutdown, from `battery_capacity`, `battery_level` above `battery_warning_threshold` and `current`. It is `null` (unknown in Home Assistant) while there is external power or `battery_capacity` is `0`. The battery level is worked out from the voltage, which isn't linear with the charge left, so treat it as a guide
 
 ### Status
@@ -136,12 +118,8 @@ Command topic | value:
 - `battery_voltage_maximum` | value (float)
 - `report_interval` | value (int)
 - `battery_capacity` | value (int, mAh, `0` to `20000`, `0` for not set)
-- `monitor_interval` | value (float, seconds, `0.5` to `300`)
-- `average_readings` | value (int, `1` to `100`)
-- `shutdown_readings` | value (int, `1` to `20`)
 - `restart` | no value required
 - `shutdown` | no value required
-- `refresh` | no value required, takes a reading and reports it straight away
 
 ## Configuration
 
@@ -165,10 +143,12 @@ Command topic | value:
 
 - `battery.internal_resistance` is the battery's internal resistance in mΩ (default `35`, `0` turns it off), see [Battery level](#battery-level)
 - `battery.average_readings` is how many monitor readings are averaged for `battery_level` (default `6`, 30 seconds at the default `ina.monitor_interval`, `1` turns it off), see [Battery level](#battery-level)
+- `battery.shutdown_readings` is how many readings in a row must be at or below `battery_warning_threshold`, on battery, before the shutdown starts (default `3`, `1` to `20`)
 - `battery.curve` maps the battery's resting voltage to its level, see [Battery level](#battery-level)
 - `battery.report_level_change` is how many percentage points `battery_level` must move since the last report to be reported straight away, rather than at the next `report_interval` (default `5`, `0` turns it off). Charging starting or stopping is always reported straight away. These reports are sent at most every 10 seconds, and `report_interval` carries on as a heartbeat
+- `system.shutdown` and `system.restart` are the commands run to shut down or restart the device. Left empty (the default) they are chosen automatically: the Supervisor API (`POST /host/shutdown` or `/host/reboot`) when running as the Home Assistant app, where the Supervisor sets `SUPERVISOR_TOKEN`; `shutdown 0 -h` or `shutdown 0 -r` when running as root; and `sudo shutdown 0 -h` or `sudo shutdown 0 -r` otherwise, which needs a sudoers entry for the user. A command that is set is run as it is, apart from `ha host shutdown`, `ha host restart` and `ha host reboot` under the Supervisor, which are sent to its API so the `ha` CLI isn't needed. The method in use is logged at start up
 - `fields.<field>.name` is used in the MQTT topics and the state JSON, so it must be letters, digits and `_`, not starting with a digit
-- `fields.<field>.enabled_by_default` is whether Home Assistant enables the entity when it first creates it. `Monitor interval`, `Readings averaged`, `Shutdown confirmation readings`, `Sensor problem`, `Last shutdown`, `Last shutdown time`, `Last shutdown voltage` and `Refresh` start disabled (enable them on the device page), the rest enabled. Home Assistant only uses it for a new entity, so one it already has keeps its enabled or disabled state
+- `fields.<field>.enabled_by_default` set to `false` creates the entity disabled in Home Assistant (default `true`). Home Assistant only uses it for a new entity, so one it already has keeps its enabled or disabled state
 - `fields.<field>.default_entity_id` sets the entity ID Home Assistant creates the entity with, for example `sensor.ups_voltage`. The older `object_id` option still works but is deprecated by Home Assistant
 
 The configuration is checked at start-up. Any invalid value stops the service with one line naming each problem, for example `` `ina.monitor_interval` must be a number of seconds from 0.1 to 86400 ``. The limits checked include:
