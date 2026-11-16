@@ -859,6 +859,9 @@ class LinkedConfiguration:
                 },
                 "sensor_problem": {
                     "name": "sensor_problem",
+                    # Hidden until enabled in Home Assistant, to keep the device
+                    # page short
+                    "enabled_by_default": False,
                     "pretty": "Sensor problem",
                     "type": "binary_sensor",
                     "device_class": "problem",
@@ -866,6 +869,9 @@ class LinkedConfiguration:
                 },
                 "last_shutdown": {
                     "name": "last_shutdown",
+                    # Hidden until enabled in Home Assistant, to keep the device
+                    # page short
+                    "enabled_by_default": False,
                     "pretty": "Last shutdown",
                     "type": "sensor",
                     "entity_category": "diagnostic",
@@ -915,6 +921,9 @@ class LinkedConfiguration:
                 },
                 "refresh": {
                     "name": "refresh",
+                    # Hidden until enabled in Home Assistant, to keep the device
+                    # page short
+                    "enabled_by_default": False,
                     "pretty": "Refresh",
                     "type": "button",
                     "entity_category": "diagnostic",

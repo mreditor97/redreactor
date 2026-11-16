@@ -351,7 +351,7 @@ def test_linked_config_new_defaults(tmp_path):
 
 
 def test_linked_config_disables_rarely_used_entities(tmp_path):
-    """Tuning numbers and shutdown details start disabled in Home Assistant."""
+    """The entities added for the new features start disabled in Home Assistant."""
     static_file = tmp_path / "config.yaml"
     static_file.write_text(yaml.dump({"hostname": {"name": "garage-pi"}}))
 
@@ -368,6 +368,9 @@ def test_linked_config_disables_rarely_used_entities(tmp_path):
         "shutdown_readings",
         "last_shutdown_time",
         "last_shutdown_voltage",
+        "sensor_problem",
+        "last_shutdown",
+        "refresh",
     }
     assert config.static["mqtt"]["topic"]["event"] == "event"
     assert config.static["mqtt"]["user"] == ""
