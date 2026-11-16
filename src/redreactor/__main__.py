@@ -13,7 +13,11 @@ from redreactor.components.homeassistant import Homeassistant
 from redreactor.components.monitor import Monitor, read_once
 from redreactor.components.mqtt import MQTT
 from redreactor.configuration import ConfigurationError, LinkedConfiguration
-from redreactor.const import DEFAULT_LOG_BACKUP_COUNT, DEFAULT_LOG_MAX_BYTES
+from redreactor.const import (
+    DEFAULT_LOG_BACKUP_COUNT,
+    DEFAULT_LOG_MAX_BYTES,
+    EXIT_POWER_COMMAND_FAILED,
+)
 from redreactor.helpers.systemd import notify, start_watchdog
 
 
@@ -179,7 +183,7 @@ def main() -> None:
     monitor = Monitor(configuration.static, configuration.dynamic)
 
     # Commander subscribes to MQTT set-topics and wires up shutdown/restart.
-    Commander(configuration.static, configuration.dynamic, monitor)
+    commander = Commander(configuration.static, configuration.dynamic, monitor)
 
     if bool(configuration.static["homeassistant"]["discovery"]):
         Homeassistant(configuration.static, configuration.dynamic)
@@ -193,6 +197,11 @@ def main() -> None:
         int(configuration.static["mqtt"]["port"]),
         int(configuration.static["mqtt"]["timeout"]),
     )
+
+    # A shutdown that didn't work would otherwise leave the device running on
+    # battery with nothing watching it, so exit non-zero to be started again
+    if commander.power_command_failed:
+        sys.exit(EXIT_POWER_COMMAND_FAILED)
 
 
 if __name__ == "__main__":

@@ -65,6 +65,9 @@ class Commander:
         # Held from the first shutdown or restart until the program exits, so
         # a repeated low battery reading or button press doesn't run it twice
         self._command_lock = threading.Lock()
+        # Set when the shutdown or restart didn't work, so the program exits
+        # with EXIT_POWER_COMMAND_FAILED and is started again
+        self.power_command_failed = False
         # Worked out once, and logged, so how the device would be shut down
         # is known before it is needed
         self._power_methods = {
@@ -294,19 +297,26 @@ class Commander:
         # connection drops when the process exits.
         time.sleep(2)
 
-        self._run_system_command(event_type)
+        if not self._run_system_command(event_type):
+            self.power_command_failed = True
+            self.logger.error(
+                "The %s didn't work, exiting so the service is started again "
+                "and can try again",
+                event_type,
+            )
 
         # This runs on a worker or timer thread, where sys.exit() would only end
         # that thread. Disconnecting makes loop_forever() return in the main
         # thread, which then exits the program.
         MQTT.event.emit(event_name="disconnect")
 
-    def _run_system_command(self, event_type: Literal["shutdown", "restart"]) -> None:
+    def _run_system_command(self, event_type: Literal["shutdown", "restart"]) -> bool:
         """Shut down or restart the device, the way logged at start-up.
 
-        See `power.power_method`: the Supervisor API, or a command. This must
-        return even when it fails, so the service still disconnects rather than
-        being left running with the readings already stopped.
+        See `power.power_method`: the Supervisor API, or a command. Returns
+        whether it worked. This must return even when it fails, so the service
+        still disconnects rather than being left running with the readings
+        already stopped.
         """
         method = self._power_methods[event_type]
 
@@ -315,12 +325,11 @@ class Commander:
                 "Asking the Supervisor for a host %s",
                 method.supervisor_action,
             )
-            supervisor.call_host_action(
+            return supervisor.call_host_action(
                 method.supervisor_action,
                 supervisor.supervisor_token() or "",
                 SYSTEM_COMMAND_TIMEOUT,
             )
-            return
 
         # The command comes from the trusted YAML config, not from the MQTT
         # payload, and is run without a shell
@@ -331,7 +340,7 @@ class Commander:
                 event_type,
                 self._static_configuration["system"][event_type],
             )
-            return
+            return False
         try:
             result = subprocess.run(  # noqa: S603
                 command,
@@ -344,6 +353,7 @@ class Commander:
                 event_type,
                 command,
             )
+            return False
         except subprocess.TimeoutExpired:
             self.logger.error(  # noqa: TRY400
                 "The %s command %s did not finish within %i seconds",
@@ -351,14 +361,16 @@ class Commander:
                 command,
                 SYSTEM_COMMAND_TIMEOUT,
             )
-        else:
-            if result.returncode != 0:
-                self.logger.error(
-                    "The %s command %s failed with exit code %i",
-                    event_type,
-                    command,
-                    result.returncode,
-                )
+            return False
+        if result.returncode != 0:
+            self.logger.error(
+                "The %s command %s failed with exit code %i",
+                event_type,
+                command,
+                result.returncode,
+            )
+            return False
+        return True
 
     def _shutdown(self) -> None:
         """Shutdown event hook."""

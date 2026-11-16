@@ -36,8 +36,8 @@ def test_automatic_under_the_supervisor(monkeypatch, event_type, action, command
     [
         ("shutdown", 0, ("shutdown", "0", "-h")),
         ("restart", 0, ("shutdown", "0", "-r")),
-        ("shutdown", 1000, ("sudo", "shutdown", "0", "-h")),
-        ("restart", 1000, ("sudo", "shutdown", "0", "-r")),
+        ("shutdown", 1000, ("sudo", "-n", "shutdown", "0", "-h")),
+        ("restart", 1000, ("sudo", "-n", "shutdown", "0", "-r")),
     ],
 )
 def test_automatic_command(monkeypatch, event_type, uid, expected):

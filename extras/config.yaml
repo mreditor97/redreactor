@@ -59,7 +59,7 @@ homeassistant:
 # System Commands
 system:
   # Left empty, these are chosen automatically: the Supervisor API under Home
-  # Assistant, `shutdown 0 -h` / `-r` as root, or through `sudo` otherwise
+  # Assistant, `shutdown 0 -h` / `-r` as root, or through `sudo -n` otherwise
   shutdown: ""
   restart: ""
 
