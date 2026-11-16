@@ -811,6 +811,9 @@ class LinkedConfiguration:
                 },
                 "monitor_interval": {
                     "name": "monitor_interval",
+                    # Hidden until enabled in Home Assistant, to keep the device
+                    # page short
+                    "enabled_by_default": False,
                     "pretty": "Monitor interval",
                     "type": "number",
                     "unit": "s",
@@ -822,6 +825,9 @@ class LinkedConfiguration:
                 },
                 "average_readings": {
                     "name": "average_readings",
+                    # Hidden until enabled in Home Assistant, to keep the device
+                    # page short
+                    "enabled_by_default": False,
                     "pretty": "Readings averaged",
                     "type": "number",
                     "entity_category": "diagnostic",
@@ -832,6 +838,9 @@ class LinkedConfiguration:
                 },
                 "shutdown_readings": {
                     "name": "shutdown_readings",
+                    # Hidden until enabled in Home Assistant, to keep the device
+                    # page short
+                    "enabled_by_default": False,
                     "pretty": "Shutdown confirmation readings",
                     "type": "number",
                     "entity_category": "diagnostic",
@@ -850,6 +859,9 @@ class LinkedConfiguration:
                 },
                 "sensor_problem": {
                     "name": "sensor_problem",
+                    # Hidden until enabled in Home Assistant, to keep the device
+                    # page short
+                    "enabled_by_default": False,
                     "pretty": "Sensor problem",
                     "type": "binary_sensor",
                     "device_class": "problem",
@@ -857,6 +869,9 @@ class LinkedConfiguration:
                 },
                 "last_shutdown": {
                     "name": "last_shutdown",
+                    # Hidden until enabled in Home Assistant, to keep the device
+                    # page short
+                    "enabled_by_default": False,
                     "pretty": "Last shutdown",
                     "type": "sensor",
                     "entity_category": "diagnostic",
@@ -864,6 +879,9 @@ class LinkedConfiguration:
                 },
                 "last_shutdown_time": {
                     "name": "last_shutdown_time",
+                    # Hidden until enabled in Home Assistant, to keep the device
+                    # page short
+                    "enabled_by_default": False,
                     "pretty": "Last shutdown time",
                     "type": "sensor",
                     "device_class": "timestamp",
@@ -872,6 +890,9 @@ class LinkedConfiguration:
                 },
                 "last_shutdown_voltage": {
                     "name": "last_shutdown_voltage",
+                    # Hidden until enabled in Home Assistant, to keep the device
+                    # page short
+                    "enabled_by_default": False,
                     "pretty": "Last shutdown voltage",
                     "type": "sensor",
                     "unit": "V",
@@ -900,6 +921,9 @@ class LinkedConfiguration:
                 },
                 "refresh": {
                     "name": "refresh",
+                    # Hidden until enabled in Home Assistant, to keep the device
+                    # page short
+                    "enabled_by_default": False,
                     "pretty": "Refresh",
                     "type": "button",
                     "entity_category": "diagnostic",

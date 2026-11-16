@@ -348,6 +348,30 @@ def test_linked_config_new_defaults(tmp_path):
     assert config.static["fields"]["under_voltage"]["entity_category"] == "diagnostic"
     assert config.static["fields"]["throttled"]["device_class"] == "problem"
     assert config.static["fields"]["power_event"]["type"] == "event"
+
+
+def test_linked_config_disables_rarely_used_entities(tmp_path):
+    """The entities added for the new features start disabled in Home Assistant."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text(yaml.dump({"hostname": {"name": "garage-pi"}}))
+
+    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+
+    disabled = {
+        key
+        for key, field in config.static["fields"].items()
+        if field.get("enabled_by_default") is False
+    }
+    assert disabled == {
+        "monitor_interval",
+        "average_readings",
+        "shutdown_readings",
+        "last_shutdown_time",
+        "last_shutdown_voltage",
+        "sensor_problem",
+        "last_shutdown",
+        "refresh",
+    }
     assert config.static["mqtt"]["topic"]["event"] == "event"
     assert config.static["mqtt"]["user"] == ""
     assert config.static["mqtt"]["password"] == ""
