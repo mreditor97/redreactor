@@ -22,6 +22,7 @@ from redreactor.const import (
     POWER_EVENT_SHUTDOWN_STARTED,
     SYSTEM_COMMAND_TIMEOUT,
 )
+from redreactor.helpers import supervisor
 from redreactor.helpers.emitter import EventEmitter
 from redreactor.helpers.topics import Topics
 
@@ -279,12 +280,36 @@ class Commander:
         # connection drops when the process exits.
         time.sleep(2)
 
+        self._run_system_command(event_type)
+
+        # This runs on a worker or timer thread, where sys.exit() would only end
+        # that thread. Disconnecting makes loop_forever() return in the main
+        # thread, which then exits the program.
+        MQTT.event.emit(event_name="disconnect")
+
+    def _run_system_command(self, event_type: Literal["shutdown", "restart"]) -> None:
+        """Run the configured shutdown or restart command.
+
+        Under the Home Assistant Supervisor, an `ha host` command (the app's
+        default) is sent to the Supervisor API directly, so the `ha` CLI isn't
+        needed. Anything else, such as `sudo shutdown 0 -h`, is run as it is.
+
+        This must return even when the command can't be run, so the service
+        still disconnects rather than being left running with the readings
+        already stopped.
+        """
+        command = self._static_configuration["system"][event_type]
+
+        token = supervisor.supervisor_token()
+        action = supervisor.host_action(command)
+        if token and action:
+            self.logger.info("Asking the Supervisor for a host %s", action)
+            supervisor.call_host_action(action, token, SYSTEM_COMMAND_TIMEOUT)
+            return
+
         # The shutdown/restart command comes from the trusted YAML config, not
         # from the MQTT payload, so splitting with shlex (shell=False) is safe.
-        # The commands are checked when the configuration is loaded, but this
-        # must still reach the disconnect below if one can't be run, otherwise
-        # the service is left running with the readings already stopped.
-        command = self._static_configuration["system"][event_type]
+        # The commands are checked when the configuration is loaded.
         try:
             cmd = shlex.split(command)
             result = subprocess.run(  # noqa: S603
@@ -313,11 +338,6 @@ class Commander:
                     cmd,
                     result.returncode,
                 )
-
-        # This runs on a worker or timer thread, where sys.exit() would only end
-        # that thread. Disconnecting makes loop_forever() return in the main
-        # thread, which then exits the program.
-        MQTT.event.emit(event_name="disconnect")
 
     def _shutdown(self) -> None:
         """Shutdown event hook."""

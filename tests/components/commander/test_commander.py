@@ -571,3 +571,86 @@ def test_on_command_hanging_command_times_out(commander):
     assert mock_run.call_args.kwargs["timeout"] == SYSTEM_COMMAND_TIMEOUT
     assert "did not finish" in mock_error.call_args.args[0]
     assert disconnect_calls == [True]
+
+
+# ---------------------------------------------------------------------------
+# Home Assistant Supervisor
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("event_type", "command", "action"),
+    [
+        ("shutdown", "ha host shutdown", "shutdown"),
+        ("restart", "ha host restart", "reboot"),
+        ("restart", "ha host reboot", "reboot"),
+    ],
+)
+def test_supervisor_host_command_uses_the_api(
+    commander,
+    monkeypatch,
+    event_type,
+    command,
+    action,
+):
+    """Under the Supervisor an `ha host` command goes to its API, not the CLI."""
+    cmd, _ = commander
+    from redreactor.components.mqtt import MQTT
+
+    MQTT.event.on("publish", lambda **_: None)
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "secret")
+    cmd._static_configuration["system"][event_type] = command
+
+    module = "redreactor.components.commander.commander"
+    with (
+        patch(f"{module}.subprocess.run") as mock_run,
+        patch(f"{module}.supervisor.call_host_action") as mock_call,
+        patch("time.sleep"),
+    ):
+        cmd._on_command(event_type)
+
+    mock_call.assert_called_once_with(action, "secret", 60)
+    mock_run.assert_not_called()
+
+
+def test_other_commands_run_under_the_supervisor(commander, monkeypatch):
+    """A command that isn't `ha host` is run as configured."""
+    cmd, _ = commander
+    from redreactor.components.mqtt import MQTT
+
+    MQTT.event.on("publish", lambda **_: None)
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "secret")
+
+    module = "redreactor.components.commander.commander"
+    with (
+        patch(f"{module}.subprocess.run") as mock_run,
+        patch(f"{module}.supervisor.call_host_action") as mock_call,
+        patch("time.sleep"),
+    ):
+        mock_run.return_value.returncode = 0
+        cmd._on_command("shutdown")
+
+    mock_call.assert_not_called()
+    assert mock_run.call_args.args[0] == ["sudo", "shutdown", "0", "-h"]
+
+
+def test_ha_host_command_runs_without_the_supervisor(commander, monkeypatch):
+    """Without a Supervisor token the `ha` command is run as configured."""
+    cmd, _ = commander
+    from redreactor.components.mqtt import MQTT
+
+    MQTT.event.on("publish", lambda **_: None)
+    monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
+    cmd._static_configuration["system"]["shutdown"] = "ha host shutdown"
+
+    module = "redreactor.components.commander.commander"
+    with (
+        patch(f"{module}.subprocess.run") as mock_run,
+        patch(f"{module}.supervisor.call_host_action") as mock_call,
+        patch("time.sleep"),
+    ):
+        mock_run.return_value.returncode = 0
+        cmd._on_command("shutdown")
+
+    mock_call.assert_not_called()
+    assert mock_run.call_args.args[0] == ["ha", "host", "shutdown"]
