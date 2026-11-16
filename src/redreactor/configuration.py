@@ -340,12 +340,18 @@ def _validate_static(configuration: dict[str, Any]) -> list[str]:  # noqa: C901
     )
 
     # Checked here, a command that can't be split would otherwise only fail
-    # once the battery is already low
+    # once the battery is already low. Empty is filled in automatically.
     for path, value in (
         ("system.shutdown", configuration["system"]["shutdown"]),
         ("system.restart", configuration["system"]["restart"]),
     ):
-        check(path, _is_command(value), "must be a command")
+        check(
+            path,
+            value is None
+            or (isinstance(value, str) and not value.strip())
+            or _is_command(value),
+            "must be a command, or empty to choose one automatically",
+        )
 
     return errors
 
@@ -690,8 +696,11 @@ class LinkedConfiguration:
                 "report_level_change": DEFAULT_BATTERY_REPORT_LEVEL_CHANGE,
             },
             "system": {
-                "shutdown": "sudo shutdown 0 -h",
-                "restart": "sudo shutdown 0 -r",
+                # Empty chooses automatically: the Supervisor API under Home
+                # Assistant, otherwise `shutdown 0 -h` or `-r`, through sudo
+                # unless running as root (see helpers/power.py)
+                "shutdown": "",
+                "restart": "",
             },
             "logging": {
                 "console": "INFO",

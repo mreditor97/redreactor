@@ -260,10 +260,8 @@ def test_linked_config_accepts_example_config(tmp_path):
         ("ina: {address: '0x40'}\n", "`ina.address`"),
         ("ina: {monitor_interval: 0}\n", "`ina.monitor_interval`"),
         ("ina: {shunt_ohms: .nan}\n", "`ina.shunt_ohms`"),
-        ("system: {shutdown: ''}\n", "`system.shutdown`"),
         # Found by starting the service with hostile configurations
         ('system: {shutdown: "echo \'oops"}\n', "`system.shutdown`"),
-        ("system: {restart: '   '}\n", "`system.restart`"),
         ("fields: {voltage: null}\n", "`fields.voltage`"),
         ("fields: {voltage: text}\n", "`fields.voltage`"),
         ("fields: {extra: {name: extra}}\n", "`fields.extra.type`"),

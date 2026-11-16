@@ -524,24 +524,36 @@ def test_on_message_deeply_nested_json_is_ignored(commander, static_config):
     assert cmd._dynamic_configuration.data["report_interval"] == 60
 
 
-def test_on_command_unsplittable_command_still_disconnects(commander, static_config):
+def test_on_command_unsplittable_command_still_disconnects(
+    commander,
+    static_config,
+    dynamic_config,
+):
     """A command shlex can't split is logged, and the service still exits.
 
     The readings are already stopped by then, so carrying on would leave the
     service running but doing nothing.
     """
-    cmd, _ = commander
+    _, monitor = commander
+    from redreactor.components.commander.commander import Commander
     from redreactor.components.mqtt import MQTT
 
     static_config["system"]["shutdown"] = "echo 'unbalanced"
+    cmd = Commander(static_config, dynamic_config, monitor)
     MQTT.event.on("publish", lambda **_: None)
     disconnect_calls: list[bool] = []
     MQTT.event.on("disconnect", lambda: disconnect_calls.append(True))
 
-    with patch("time.sleep"), patch.object(cmd.logger, "exception") as mock_exc:
+    target = "redreactor.components.commander.commander.subprocess.run"
+    with (
+        patch("time.sleep"),
+        patch(target) as mock_run,
+        patch.object(cmd.logger, "error") as mock_error,
+    ):
         cmd._on_command("shutdown")
 
-    mock_exc.assert_called_once()
+    mock_run.assert_not_called()
+    assert "can't be split" in mock_error.call_args.args[0]
     assert disconnect_calls == [True]
 
 
@@ -586,20 +598,22 @@ def test_on_command_hanging_command_times_out(commander):
         ("restart", "ha host reboot", "reboot"),
     ],
 )
-def test_supervisor_host_command_uses_the_api(
-    commander,
+def test_supervisor_host_command_uses_the_api(  # noqa: PLR0913, PLR0917
+    static_config,
+    dynamic_config,
     monkeypatch,
     event_type,
     command,
     action,
 ):
     """Under the Supervisor an `ha host` command goes to its API, not the CLI."""
-    cmd, _ = commander
+    from redreactor.components.commander.commander import Commander
     from redreactor.components.mqtt import MQTT
 
-    MQTT.event.on("publish", lambda **_: None)
     monkeypatch.setenv("SUPERVISOR_TOKEN", "secret")
-    cmd._static_configuration["system"][event_type] = command
+    static_config["system"][event_type] = command
+    cmd = Commander(static_config, dynamic_config, MagicMock())
+    MQTT.event.on("publish", lambda **_: None)
 
     module = "redreactor.components.commander.commander"
     with (
@@ -634,14 +648,19 @@ def test_other_commands_run_under_the_supervisor(commander, monkeypatch):
     assert mock_run.call_args.args[0] == ["sudo", "shutdown", "0", "-h"]
 
 
-def test_ha_host_command_runs_without_the_supervisor(commander, monkeypatch):
+def test_ha_host_command_runs_without_the_supervisor(
+    static_config,
+    dynamic_config,
+    monkeypatch,
+):
     """Without a Supervisor token the `ha` command is run as configured."""
-    cmd, _ = commander
+    from redreactor.components.commander.commander import Commander
     from redreactor.components.mqtt import MQTT
 
-    MQTT.event.on("publish", lambda **_: None)
     monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
-    cmd._static_configuration["system"]["shutdown"] = "ha host shutdown"
+    static_config["system"]["shutdown"] = "ha host shutdown"
+    cmd = Commander(static_config, dynamic_config, MagicMock())
+    MQTT.event.on("publish", lambda **_: None)
 
     module = "redreactor.components.commander.commander"
     with (
@@ -654,3 +673,22 @@ def test_ha_host_command_runs_without_the_supervisor(commander, monkeypatch):
 
     mock_call.assert_not_called()
     assert mock_run.call_args.args[0] == ["ha", "host", "shutdown"]
+
+
+def test_start_up_logs_the_power_methods(static_config, dynamic_config, monkeypatch):
+    """The shutdown and restart methods in use are logged at start up."""
+    from redreactor.components.commander.commander import Commander
+
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "secret")
+    static_config["system"]["shutdown"] = ""
+    static_config["system"]["restart"] = "sudo shutdown 0 -r"
+
+    with patch.object(Commander.logger, "info") as mock_info:
+        Commander(static_config, dynamic_config, MagicMock())
+
+    lines = [call.args[0] % call.args[1:] for call in mock_info.call_args_list]
+    assert (
+        "The shutdown will use the Supervisor API (POST /host/shutdown), "
+        "chosen automatically"
+    ) in lines
+    assert "The restart will use `sudo shutdown 0 -r`" in lines

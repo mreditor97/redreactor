@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import shlex
 import subprocess
 import threading
 import time
@@ -22,7 +21,7 @@ from redreactor.const import (
     POWER_EVENT_SHUTDOWN_STARTED,
     SYSTEM_COMMAND_TIMEOUT,
 )
-from redreactor.helpers import supervisor
+from redreactor.helpers import power, supervisor
 from redreactor.helpers.emitter import EventEmitter
 from redreactor.helpers.topics import Topics
 
@@ -66,6 +65,21 @@ class Commander:
         # Held from the first shutdown or restart until the program exits, so
         # a repeated low battery reading or button press doesn't run it twice
         self._command_lock = threading.Lock()
+        # Worked out once, and logged, so how the device would be shut down
+        # is known before it is needed
+        self._power_methods = {
+            event_type: power.power_method(
+                event_type,
+                static_configuration["system"][event_type],
+            )
+            for event_type in ("shutdown", "restart")
+        }
+        for event_type, method in self._power_methods.items():
+            self.logger.info(
+                "The %s will use %s",
+                event_type,
+                method.describe(),
+            )
 
         self.logger.debug("Setup the command handler")
 
@@ -288,44 +302,51 @@ class Commander:
         MQTT.event.emit(event_name="disconnect")
 
     def _run_system_command(self, event_type: Literal["shutdown", "restart"]) -> None:
-        """Run the configured shutdown or restart command.
+        """Shut down or restart the device, the way logged at start-up.
 
-        Under the Home Assistant Supervisor, an `ha host` command (the app's
-        default) is sent to the Supervisor API directly, so the `ha` CLI isn't
-        needed. Anything else, such as `sudo shutdown 0 -h`, is run as it is.
-
-        This must return even when the command can't be run, so the service
-        still disconnects rather than being left running with the readings
-        already stopped.
+        See `power.power_method`: the Supervisor API, or a command. This must
+        return even when it fails, so the service still disconnects rather than
+        being left running with the readings already stopped.
         """
-        command = self._static_configuration["system"][event_type]
+        method = self._power_methods[event_type]
 
-        token = supervisor.supervisor_token()
-        action = supervisor.host_action(command)
-        if token and action:
-            self.logger.info("Asking the Supervisor for a host %s", action)
-            supervisor.call_host_action(action, token, SYSTEM_COMMAND_TIMEOUT)
+        if method.supervisor_action:
+            self.logger.info(
+                "Asking the Supervisor for a host %s",
+                method.supervisor_action,
+            )
+            supervisor.call_host_action(
+                method.supervisor_action,
+                supervisor.supervisor_token() or "",
+                SYSTEM_COMMAND_TIMEOUT,
+            )
             return
 
-        # The shutdown/restart command comes from the trusted YAML config, not
-        # from the MQTT payload, so splitting with shlex (shell=False) is safe.
-        # The commands are checked when the configuration is loaded.
+        # The command comes from the trusted YAML config, not from the MQTT
+        # payload, and is run without a shell
+        command = list(method.command)
+        if not command:
+            self.logger.error(
+                "Unable to run the %s command %r, it can't be split into arguments",
+                event_type,
+                self._static_configuration["system"][event_type],
+            )
+            return
         try:
-            cmd = shlex.split(command)
             result = subprocess.run(  # noqa: S603
-                cmd,
+                command,
                 check=False,
                 timeout=SYSTEM_COMMAND_TIMEOUT,
             )
-        except (OSError, ValueError):
+        except OSError:
             self.logger.exception(
-                "Unable to run the %s command %r",
+                "Unable to run the %s command %s",
                 event_type,
                 command,
             )
         except subprocess.TimeoutExpired:
             self.logger.error(  # noqa: TRY400
-                "The %s command %r did not finish within %i seconds",
+                "The %s command %s did not finish within %i seconds",
                 event_type,
                 command,
                 SYSTEM_COMMAND_TIMEOUT,
@@ -335,7 +356,7 @@ class Commander:
                 self.logger.error(
                     "The %s command %s failed with exit code %i",
                     event_type,
-                    cmd,
+                    command,
                     result.returncode,
                 )
 

@@ -58,8 +58,10 @@ homeassistant:
 
 # System Commands
 system:
-  shutdown: sudo shutdown 0 -h
-  restart: sudo shutdown 0 -r
+  # Left empty, these are chosen automatically: the Supervisor API under Home
+  # Assistant, `shutdown 0 -h` / `-r` as root, or through `sudo` otherwise
+  shutdown: ""
+  restart: ""
 
 # Logging Levels
 logging:
