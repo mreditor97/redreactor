@@ -317,8 +317,8 @@ def test_monitor_device_range_error_stays_online(monitor, mock_ina):
     with patch.object(monitor, "_update_cpu_information"):
         monitor._monitor(ina=mock_ina)
 
+    # The status is only sent by MQTT on connect, never offline from here
     status = [payload for topic, payload in published if topic.endswith("/status")]
-    assert status
     assert "offline" not in status
     assert any(topic.endswith("/state") for topic, _ in published)
 
@@ -443,11 +443,24 @@ def _shutdown_events(monitor):
 
 
 def test_monitor_reads_power_in_watts(monitor, mock_ina):
-    """pi-ina219 reports milliwatts, published power is in watts."""
-    mock_ina.power.return_value = 2500.0
+    """Power is volts times milliamps, published in watts."""
+    with patch.object(monitor, "_update"):
+        _run_monitor_with_ina(monitor, mock_ina, voltage=5.0, current=500.0)
+    assert monitor.data.power == 2.5
+
+
+def test_monitor_power_is_positive_while_charging(monitor, mock_ina):
+    """Like the INA219's power register, power is positive both ways."""
+    with patch.object(monitor, "_update"):
+        _run_monitor_with_ina(monitor, mock_ina, voltage=4.0, current=-250.0)
+    assert monitor.data.power == 1.0
+
+
+def test_monitor_does_not_read_the_power_register(monitor, mock_ina):
+    """power() costs two more I2C reads, so it is worked out instead."""
     with patch.object(monitor, "_update"):
         _run_monitor_with_ina(monitor, mock_ina, current=500.0)
-    assert monitor.data.power == 2.5
+    mock_ina.power.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -477,6 +490,7 @@ def test_monitor_shuts_down_at_warning_threshold(monitor, mock_ina, dynamic_conf
 def test_monitor_settable_warning_threshold(monitor, mock_ina, dynamic_config):
     """Raising the threshold shuts down at a higher charge."""
     dynamic_config.data["battery_warning_threshold"] = 50
+    monitor._update_dynamic_configuration()
     shutdown_called = _shutdown_events(monitor)
 
     with patch.object(monitor, "_update"):
@@ -494,6 +508,7 @@ def test_monitor_above_warning_threshold_does_not_shut_down(
 ):
     """Above the threshold on battery it keeps running."""
     dynamic_config.data["battery_warning_threshold"] = 5
+    monitor._update_dynamic_configuration()
     shutdown_called = _shutdown_events(monitor)
 
     with patch.object(monitor, "_update"):
@@ -602,6 +617,7 @@ def test_time_remaining_unknown_without_capacity(monitor, mock_ina):
 def test_time_remaining_on_battery(monitor, mock_ina, dynamic_config):
     """The charge above the shutdown level is divided by the current drawn."""
     dynamic_config.data["battery_capacity"] = 3000
+    monitor._update_dynamic_configuration()
     with patch.object(monitor, "_update"):
         _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
 
@@ -614,6 +630,7 @@ def test_time_remaining_on_battery(monitor, mock_ina, dynamic_config):
 def test_time_remaining_zero_at_shutdown_level(monitor, mock_ina, dynamic_config):
     """At or below the shutdown level there is no time left, not a negative."""
     dynamic_config.data["battery_capacity"] = 3000
+    monitor._update_dynamic_configuration()
     with patch.object(monitor, "_update"):
         _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_7_PERCENT, 500.0)
 
@@ -629,6 +646,7 @@ def test_time_remaining_unknown_with_external_power(
 ):
     """Charging or floating on external power gives no estimate."""
     dynamic_config.data["battery_capacity"] = 3000
+    monitor._update_dynamic_configuration()
     with patch.object(monitor, "_update"):
         _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, current)
 
@@ -651,6 +669,7 @@ def test_state_payload_includes_capacity_and_time_remaining(
         lambda topic, payload, **_: published.__setitem__(topic, payload),
     )
     dynamic_config.data["battery_capacity"] = 3000
+    monitor._update_dynamic_configuration()
     with patch.object(monitor, "_update"):
         _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, 500.0)
     monitor._update()
@@ -678,12 +697,11 @@ def test_state_payload_includes_new_fields(monitor, mock_ina):
         "publish",
         lambda topic, payload, **_: published.__setitem__(topic, payload),
     )
-    mock_ina.power.return_value = 1234.0
     _run_monitor_with_ina(monitor, mock_ina, VOLTAGE_49_PERCENT, -50.0)
     monitor._update()
 
     state = json.loads(published["redreactor/redreactor/state"])
-    assert state["power"] == 1.234
+    assert state["power"] == round(VOLTAGE_49_PERCENT * 50.0 / 1000, 3)
     assert state["charging"] == "ON"
     # Charging is published as a positive current
     assert state["current"] == 50.0
@@ -751,7 +769,7 @@ def test_read_once_exits_when_board_is_missing(static_config):
 def test_report_interval_change_restarts_report_timer(monitor, dynamic_config):
     """A new report interval takes effect now, not after the old tick."""
     monitor.report_timer.start()
-    pending = monitor.report_timer._timer
+    pending = monitor.report_timer._thread
 
     dynamic_config.data["report_interval"] = 5
     monitor._update_dynamic_configuration()
@@ -759,8 +777,9 @@ def test_report_interval_change_restarts_report_timer(monitor, dynamic_config):
     try:
         assert monitor.report_timer.interval == 5
         assert monitor.report_timer.is_running is True
-        assert monitor.report_timer._timer is not pending
-        assert pending.finished.is_set()
+        assert monitor.report_timer._thread is not pending
+        pending.join(timeout=2)
+        assert not pending.is_alive()
     finally:
         monitor.report_timer.stop()
 
@@ -830,13 +849,14 @@ def test_reconnect_restarts_report_timer(monitor, mock_ina):
     """A reconnect reschedules the next report a full interval from now."""
     monitor._monitor(ina=mock_ina)
     monitor.report_timer.start()
-    pending = monitor.report_timer._timer
+    pending = monitor.report_timer._thread
 
     try:
         monitor._mqtt_on_connect(None, None, None, None)
         assert monitor.report_timer.is_running is True
-        assert monitor.report_timer._timer is not pending
-        assert pending.finished.is_set()
+        assert monitor.report_timer._thread is not pending
+        pending.join(timeout=2)
+        assert not pending.is_alive()
     finally:
         monitor.report_timer.stop()
 
@@ -1184,3 +1204,69 @@ def test_report_waits_for_a_reading_in_progress(monitor, mock_ina):
     assert states
     assert all(state["voltage"] == 3.0 for state in states)
     assert all(state["current"] == -50.0 for state in states)
+
+
+# ---------------------------------------------------------------------------
+# Fewer messages and I2C reads
+# ---------------------------------------------------------------------------
+
+
+def test_report_does_not_resend_online_status(monitor):
+    """The online status is sent on connect, not with every report."""
+    from redreactor.components.mqtt import MQTT
+
+    topics = []
+    MQTT.event.on("publish", lambda topic, **_: topics.append(topic))
+
+    with patch.object(monitor, "_update_cpu_information"):
+        monitor._update()
+
+    assert topics == ["redreactor/redreactor/state"]
+
+
+def test_reading_does_not_reread_dynamic_configuration(monitor, mock_ina):
+    """A setting change is applied by the write event, not polled each tick."""
+    with (
+        patch.object(monitor, "_update"),
+        patch.object(monitor, "_update_dynamic_configuration") as reread,
+    ):
+        _run_monitor_with_ina(monitor, mock_ina, current=500.0)
+
+    reread.assert_not_called()
+
+
+def test_setting_change_applies_through_write_event(monitor, dynamic_config):
+    """A setting saved from MQTT is used straight away."""
+    dynamic_config.data["battery_warning_threshold"] = 42
+
+    with patch.object(monitor, "_update_cpu_information"):
+        dynamic_config.event.emit("write")
+
+    assert monitor.data.battery_warning_threshold == 42
+
+
+@pytest.mark.parametrize(
+    ("samples", "setting"),
+    [(1, 3), (2, 9), (4, 10), (8, 11), (16, 12), (32, 13), (64, 14), (128, 15)],
+)
+def test_ina_adc_setting_matches_pi_ina219(samples, setting):
+    """Each sample count maps to pi-ina219's ADC constant."""
+    from ina219 import INA219
+
+    from redreactor.components.monitor.monitor import ina_adc_setting
+
+    names = {1: "ADC_12BIT"} | {n: f"ADC_{n}SAMP" for n in (2, 4, 8, 16, 32, 64, 128)}
+    assert ina_adc_setting(samples) == setting == getattr(INA219, names[samples])
+
+
+def test_ina_configured_with_adc_samples(static_config, dynamic_config, mock_ina):
+    """The INA219 is set to average the configured number of samples."""
+    static_config["ina"]["adc_samples"] = 32
+
+    _make_monitor(static_config, dynamic_config, mock_ina)
+
+    mock_ina.configure.assert_called_once_with(
+        voltage_range=mock_ina.RANGE_16V,
+        bus_adc=13,
+        shunt_adc=13,
+    )

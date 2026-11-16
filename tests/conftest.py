@@ -216,6 +216,7 @@ def static_config():
             "max_expected_amps": 5.5,
             "monitor_interval": 5,
             "bus": 1,
+            "adc_samples": 1,
         },
         "battery": {
             "internal_resistance": 0,

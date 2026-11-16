@@ -541,3 +541,66 @@ def test_unrelated_setting_change_does_not_republish(dynamic_config):
     dynamic_config.event.emit("write")
 
     assert DEVICE_TOPIC not in published
+
+
+# ---------------------------------------------------------------------------
+# Fewer discovery messages
+# ---------------------------------------------------------------------------
+
+
+def test_discovery_interval_zero_does_not_repeat(static_config, dynamic_config):
+    """0 sends discovery on connect only, without the repeat timer."""
+    from redreactor.components.homeassistant import Homeassistant
+
+    static_config["homeassistant"]["discovery_interval"] = 0
+    homeassistant = Homeassistant(static_config, dynamic_config)
+
+    with (
+        patch.object(homeassistant, "_update_homeassistant_configuration") as update,
+        patch.object(homeassistant.configuration_report_timer, "start") as start,
+    ):
+        homeassistant._mqtt_on_connect(MagicMock(), None, None, None)
+
+    update.assert_called_once()
+    start.assert_not_called()
+
+
+def test_discovery_json_is_built_once(homeassistant):
+    """The unchanged discovery payload isn't rebuilt for every publish."""
+    first = _published(homeassistant)[0][1]
+    with patch.object(homeassistant, "_device_discovery_payload") as build:
+        second = _published(homeassistant)[0][1]
+
+    build.assert_not_called()
+    assert second == first
+
+
+def test_finished_migration_is_saved(homeassistant, dynamic_config):
+    """Once migrated, the dynamic configuration records it."""
+    import json
+    from pathlib import Path
+
+    with patch(
+        "redreactor.components.homeassistant.homeassistant.threading.Timer",
+    ) as timer:
+        _published(homeassistant, migrated=False)
+    _, finish = timer.call_args.args
+    finish()
+
+    saved = json.loads(Path(dynamic_config._dynamic_file).read_text())
+    assert saved["discovery_migration"] == 1
+
+
+def test_saved_migration_is_not_repeated(static_config, dynamic_config):
+    """A restart after the migration sends only the device discovery."""
+    from redreactor.components.homeassistant import Homeassistant
+    from redreactor.components.mqtt import MQTT
+
+    dynamic_config.data["discovery_migration"] = 1
+    homeassistant = Homeassistant(static_config, dynamic_config)
+
+    published = []
+    MQTT.event.on("publish", lambda topic, **_: published.append(topic))
+    homeassistant._update_homeassistant_configuration()
+
+    assert published == [DEVICE_TOPIC]

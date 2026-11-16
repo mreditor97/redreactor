@@ -28,6 +28,10 @@ from __future__ import annotations
 import shutil
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING, TypeVar
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
 
 # Bit positions in the Raspberry Pi firmware throttling bitmask.
 # Bits 0-3 reflect the CURRENT state; bits 16-19 reflect whether the condition
@@ -163,9 +167,71 @@ def find_cpu_thermal_zone() -> Path | None:
     return zones[0]
 
 
+# The CPU thermal zone found last, with the root it was found under. Finding it
+# reads every zone's temperature and type, so it is only done again when the
+# zone stops giving a reading (or the root changes, as it does in the tests).
+_cached_zone: tuple[Path, Path] | None = None
+
+# The reader that gave the last temperature and throttling values, tried first
+# next time so the sources before it aren't searched (or run) on every report
+_preferred_readers: dict[str, Callable[[], object]] = {}
+
+
+def reset_cache() -> None:
+    """Forget the thermal zone and readers found so far."""
+    global _cached_zone  # noqa: PLW0603
+    _cached_zone = None
+    _preferred_readers.clear()
+
+
+def _cpu_thermal_zone() -> Path | None:
+    """Return the CPU thermal zone, found once and kept while it works."""
+    global _cached_zone  # noqa: PLW0603
+    if _cached_zone is not None:
+        root, cached = _cached_zone
+        if root == THERMAL_ROOT and (
+            _millidegrees_to_celsius(_read_int(cached / "temp")) is not None
+        ):
+            return cached
+
+    zone = find_cpu_thermal_zone()
+    _cached_zone = (THERMAL_ROOT, zone) if zone is not None else None
+    return zone
+
+
+T = TypeVar("T")
+
+
+def _first_value(
+    name: str,
+    readers: Sequence[Callable[[], T | None]],
+) -> T | None:
+    """Return the first value from the readers, starting with the last to work.
+
+    The search through every reader only happens when the one that worked last
+    time gives nothing.
+    """
+    preferred = _preferred_readers.get(name)
+    if preferred is not None:
+        value = preferred()
+        if value is not None:
+            return value  # type: ignore[return-value]
+
+    for reader in readers:
+        if reader is preferred:
+            continue
+        value = reader()
+        if value is not None:
+            _preferred_readers[name] = reader
+            return value
+
+    _preferred_readers.pop(name, None)
+    return None
+
+
 def read_cpu_temperature_sysfs() -> float | None:
     """Read CPU temperature from the CPU thermal zone."""
-    zone = find_cpu_thermal_zone()
+    zone = _cpu_thermal_zone()
     if zone is None:
         return None
     return _millidegrees_to_celsius(_read_int(zone / "temp"))
@@ -255,15 +321,14 @@ def read_cpu_temperature_vcgencmd() -> float | None:
 
 def read_cpu_temperature() -> float | None:
     """Unified fallback: thermal zone → hwmon → vcgencmd."""
-    for method in (
-        read_cpu_temperature_sysfs,
-        read_cpu_temperature_hwmon,
-        read_cpu_temperature_vcgencmd,
-    ):
-        value = method()
-        if value is not None:
-            return value
-    return None
+    return _first_value(
+        "temperature",
+        (
+            read_cpu_temperature_sysfs,
+            read_cpu_temperature_hwmon,
+            read_cpu_temperature_vcgencmd,
+        ),
+    )
 
 
 def read_cpu_stat_sysfs() -> int | None:
@@ -351,7 +416,7 @@ def read_cpu_stat_inferred() -> int | None:
     under_voltage = read_under_voltage_hwmon()
     scaling_max, cpuinfo_max = _read_cpufreq()
 
-    zone = find_cpu_thermal_zone()
+    zone = _cpu_thermal_zone()
     current_temp = _read_int(zone / "temp") if zone is not None else None
     trip_temp = _passive_trip_temperature(zone) if zone is not None else None
 
@@ -384,15 +449,14 @@ def read_cpu_stat_inferred() -> int | None:
 
 def read_cpu_stat() -> int | None:
     """Unified throttling fallback: firmware sysfs → vcgencmd → inferred."""
-    for method in (
-        read_cpu_stat_sysfs,
-        read_cpu_stat_vcgencmd,
-        read_cpu_stat_inferred,
-    ):
-        value = method()
-        if value is not None:
-            return value
-    return None
+    return _first_value(
+        "throttling",
+        (
+            read_cpu_stat_sysfs,
+            read_cpu_stat_vcgencmd,
+            read_cpu_stat_inferred,
+        ),
+    )
 
 
 def decode_cpu_stat_text(value: int) -> str:

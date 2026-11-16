@@ -241,9 +241,13 @@ def test_linked_config_accepts_example_config(tmp_path):
         ("mqtt: {topic: {set: 'a/b'}}\n", "`mqtt.topic.set`"),
         ("homeassistant: {discovery: 'yes'}\n", "`homeassistant.discovery`"),
         (
-            "homeassistant: {discovery_interval: 0}\n",
+            "homeassistant: {discovery_interval: -1}\n",
             "`homeassistant.discovery_interval`",
         ),
+        ("ina: {adc_samples: 3}\n", "`ina.adc_samples`"),
+        ("ina: {adc_samples: 256}\n", "`ina.adc_samples`"),
+        ("ina: {adc_samples: 2.0}\n", "`ina.adc_samples`"),
+        ("ina: {adc_samples: true}\n", "`ina.adc_samples`"),
         ("homeassistant: {expire_after: -1}\n", "`homeassistant.expire_after`"),
         (
             "homeassistant: {status_topic: 'homeassistant/#'}\n",
@@ -527,3 +531,34 @@ def test_dynamic_config_write_failure_is_logged(tmp_path, caplog):
 
     assert "Unable to save the settings" in caplog.text
     assert config.data["report_interval"] == 45
+
+
+def test_linked_config_accepts_discovery_interval_off(tmp_path):
+    """A discovery interval of 0 turns the repeated discovery off."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text("homeassistant: {discovery_interval: 0}")
+
+    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+
+    assert config.static["homeassistant"]["discovery_interval"] == 0
+
+
+@pytest.mark.parametrize("samples", [1, 2, 32, 128, "64"])
+def test_linked_config_accepts_adc_samples(tmp_path, samples):
+    """Each INA219 averaging setting is accepted, quoted ones converted."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text(f"ina: {{adc_samples: {samples!r}}}")
+
+    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+
+    assert config.static["ina"]["adc_samples"] == int(samples)
+
+
+def test_linked_config_adc_samples_default_is_single_sample(tmp_path):
+    """Without the option the INA219 keeps its single 12-bit sample."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text("")
+
+    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+
+    assert config.static["ina"]["adc_samples"] == 1
