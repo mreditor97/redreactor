@@ -13,6 +13,7 @@ from paho.mqtt.client import Client, MQTTMessage, MQTTv5, MQTTv311
 from paho.mqtt.enums import CallbackAPIVersion
 
 from redreactor.helpers.emitter import EventEmitter
+from redreactor.helpers.topics import Topics
 
 if TYPE_CHECKING:
     from paho.mqtt.client import DisconnectFlags
@@ -159,14 +160,7 @@ class MQTT:
     @property
     def _status_topic(self) -> str:
         """Topic used for the online / offline status."""
-        mqtt_configuration = self._static_configuration["mqtt"]
-        return "/".join(
-            (
-                mqtt_configuration["base_topic"],
-                self._static_configuration["hostname"]["name"],
-                mqtt_configuration["topic"]["status"],
-            ),
-        )
+        return Topics.from_configuration(self._static_configuration).status
 
     def connect(
         self,

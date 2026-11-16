@@ -27,6 +27,17 @@ DEFAULT_BATTERY_INTERNAL_RESISTANCE = 35.0
 DEFAULT_BATTERY_AVERAGE_READINGS = 6
 BATTERY_AVERAGE_READINGS_MAXIMUM = 100
 
+# The settings that can be changed over MQTT and are kept in the dynamic
+# configuration file: their type and default. The MonitorData attribute of the
+# same name holds the value in use.
+DYNAMIC_SETTINGS: dict[str, tuple[type[int] | type[float], int | float]] = {
+    "report_interval": (int, DEFAULT_REPORT_INTERVAL),
+    "battery_warning_threshold": (int, DEFAULT_BATTERY_WARNING_THRESHOLD),
+    "battery_voltage_minimum": (float, DEFAULT_BATTERY_VOLTAGE_MINIMUM),
+    "battery_voltage_maximum": (float, DEFAULT_BATTERY_VOLTAGE_MAXIMUM),
+    "battery_capacity": (int, DEFAULT_BATTERY_CAPACITY),
+}
+
 DEFAULT_INA_I2C_ADDRESS = 0x40  # Red Reactor Default I2C Address
 DEFAULT_INA_SHUNT_OHMS = 0.05  # Red Reactor Shunt Ohms
 DEFAULT_INA_MAX_EXPECTED_AMPS = 5.5

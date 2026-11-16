@@ -383,10 +383,12 @@ def test_on_command_logs_missing_system_command(commander):
     assert disconnect_calls == [True]
 
 
-def test_on_message_matches_renamed_field_name(commander, static_config):
+def test_on_message_matches_renamed_field_name(static_config, dynamic_config):
     """Commands are matched on the configured field name, stored by field key."""
-    cmd, _ = commander
+    from redreactor.components.commander.commander import Commander
+
     static_config["fields"]["report_interval"]["name"] = "interval_seconds"
+    cmd = Commander(static_config, dynamic_config, MagicMock())
 
     _send_number(cmd, static_config, "interval_seconds", "60")
 
