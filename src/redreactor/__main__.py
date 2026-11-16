@@ -6,6 +6,7 @@ import logging
 import sys
 from importlib.metadata import version
 from logging.handlers import RotatingFileHandler
+from typing import Any
 
 from redreactor.components.commander import Commander
 from redreactor.components.homeassistant import Homeassistant
@@ -13,6 +14,7 @@ from redreactor.components.monitor import Monitor, read_once
 from redreactor.components.mqtt import MQTT
 from redreactor.configuration import ConfigurationError, LinkedConfiguration
 from redreactor.const import DEFAULT_LOG_BACKUP_COUNT, DEFAULT_LOG_MAX_BYTES
+from redreactor.helpers.systemd import notify, start_watchdog
 
 
 def get_arguments() -> argparse.Namespace:
@@ -48,6 +50,44 @@ def get_arguments() -> argparse.Namespace:
     )
 
     return parser.parse_args()
+
+
+def _set_log_levels(
+    logging_configuration: dict[str, Any],
+    handlers: tuple[tuple[str, logging.Handler | None], ...],
+) -> None:
+    """Set each log handler's level from the configuration.
+
+    Limited to the listed levels. Handler.setLevel() only accepts upper case
+    names, so they are normalised first.
+    """
+    logger = logging.getLogger("Red Reactor")
+    logging_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+    for name, handler in handlers:
+        if handler is None:
+            continue
+        level = str(logging_configuration[name]).upper()
+        if level in logging_levels:
+            handler.setLevel(level)
+            logger.info("%s log level set to %s", name.capitalize(), level)
+        else:
+            logger.warning(
+                "Invalid %s log level %r, must be one of %s",
+                name,
+                logging_configuration[name],
+                ", ".join(logging_levels),
+            )
+
+
+def _notify_systemd(monitor: Monitor) -> None:
+    """Tell systemd the service has started, and start its watchdog pings.
+
+    Under systemd with `Type=notify`, the service counts as started from here,
+    and the watchdog restarts it if the readings stop. Outside systemd neither
+    does anything.
+    """
+    notify("READY=1")
+    start_watchdog(monitor.is_healthy)
 
 
 def main() -> None:
@@ -119,23 +159,10 @@ def main() -> None:
         )
         sys.exit(1)
 
-    # Update logging levels, limited to listed set. Handler.setLevel() only
-    # accepts upper case names, so normalise them first.
-    logging_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-    for handler, name in ((c_handler, "console"), (f_handler, "file")):
-        if handler is None:
-            continue
-        level = str(configuration.static["logging"][name]).upper()
-        if level in logging_levels:
-            handler.setLevel(level)
-            logger.info("%s log level set to %s", name.capitalize(), level)
-        else:
-            logger.warning(
-                "Invalid %s log level %r, must be one of %s",
-                name,
-                configuration.static["logging"][name],
-                ", ".join(logging_levels),
-            )
+    _set_log_levels(
+        configuration.static["logging"],
+        (("console", c_handler), ("file", f_handler)),
+    )
 
     if args.check:
         print(json.dumps(read_once(configuration.static), indent=2))  # noqa: T201
@@ -156,6 +183,8 @@ def main() -> None:
 
     if bool(configuration.static["homeassistant"]["discovery"]):
         Homeassistant(configuration.static, configuration.dynamic)
+
+    _notify_systemd(monitor)
 
     # Blocks here — loop_forever() drives the entire application until the
     # battery shuts the device down or the process is signalled.

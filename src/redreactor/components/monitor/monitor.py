@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
+import time
 from collections import deque
 from itertools import pairwise
 from threading import Lock, RLock
@@ -13,18 +14,21 @@ from typing import TYPE_CHECKING, Any
 from redreactor.components.monitor.data import MonitorData
 from redreactor.components.mqtt import MQTT
 from redreactor.const import (
-    DEFAULT_BATTERY_AVERAGE_READINGS,
     DEFAULT_BATTERY_INTERNAL_RESISTANCE,
+    DEFAULT_BATTERY_REPORT_LEVEL_CHANGE,
     DEFAULT_BATTERY_VOLTAGE_HEADROOM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM,
     DEFAULT_BATTERY_VOLTAGE_MAXIMUM_DROP,
     DEFAULT_BATTERY_VOLTAGE_MINIMUM,
-    DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS,
     DYNAMIC_SETTINGS,
     HOURS_PER_DAY,
+    LAST_SHUTDOWN_KEY,
     POWER_EVENT_LOW_BATTERY,
     POWER_EVENT_POWER_LOST,
     POWER_EVENT_POWER_RESTORED,
+    REPORT_ON_CHANGE_MINIMUM_INTERVAL,
+    SENSOR_PROBLEM_READINGS,
+    WATCHDOG_TICK_MARGIN,
 )
 from redreactor.helpers.cpu_utils import (
     FREQ_CAPPED_BIT,
@@ -183,19 +187,21 @@ class Monitor:
         self._static_configuration = static_configuration
         self._dynamic_configuration = dynamic_configuration
         self._topics = Topics.from_configuration(static_configuration)
-        self._battery_readings = deque(
-            maxlen=int(
-                static_configuration.get("battery", {}).get(
-                    "average_readings",
-                    DEFAULT_BATTERY_AVERAGE_READINGS,
-                ),
-            ),
-        )
+        # Sized from the readings averaged setting by
+        # _update_dynamic_configuration below
+        self._battery_readings = deque(maxlen=self.data.average_readings)
         self._has_reading = False
         self._read_failures = 0
         self._report_pending = False
         self._shutdown_emitted = False
         self._stopped = False
+        # The battery level and charging state last reported, and when, for
+        # reporting a change straight away
+        self._reported_level: float | None = None
+        self._reported_charging: bool | None = None
+        self._reported_at = 0.0
+        # When the last reading finished, for the systemd watchdog
+        self._last_tick = time.monotonic()
         # Guards the two flags above, which the MQTT thread and the monitor
         # timer thread both use
         self._report_lock = Lock()
@@ -224,9 +230,9 @@ class Monitor:
 
         # Update Dynamic Configuration values to there latest values
         self._update_dynamic_configuration()
+        self._load_last_shutdown()
 
         # Setup the INA219
-        ina: INA219 | None = None
         try:
             ina = create_ina(static_configuration["ina"])
         except (OSError, ModuleNotFoundError):
@@ -235,13 +241,39 @@ class Monitor:
             # Exit the program, non-zero so a supervisor can retry
             sys.exit(1)
 
+        self._ina = ina
+
         # Configure the monitor timer, start's as soon as possible
         self.monitor_timer = RepeatTimer(
-            float(self._static_configuration["ina"]["monitor_interval"]),
+            self.data.monitor_interval,
             self._monitor,
             ina=ina,
         )
         self.monitor_timer.start()
+
+    def _load_last_shutdown(self) -> None:
+        """Read the last shutdown or restart saved before this start."""
+        last_shutdown = self._dynamic_configuration.data.get(LAST_SHUTDOWN_KEY)
+        self.data.last_shutdown = (
+            last_shutdown if isinstance(last_shutdown, dict) else None
+        )
+
+    def refresh(self) -> None:
+        """Take a reading and report it straight away, for the refresh button."""
+        self.logger.info("Refreshing the readings")
+        self._monitor(self._ina)
+        self._update()
+
+    def is_healthy(self) -> bool:
+        """Return whether the readings are still being taken.
+
+        Used by the systemd watchdog. Readings that stop because the service
+        is shutting down or restarting are expected, so that counts as healthy.
+        """
+        if self._stopped:
+            return True
+        allowed = 2 * self.data.monitor_interval + WATCHDOG_TICK_MARGIN
+        return time.monotonic() - self._last_tick <= allowed
 
     def _monitor(self, ina: INA219) -> None:
         """Monitor INA Thread Loop.
@@ -254,10 +286,15 @@ class Monitor:
 
         with self._data_lock:
             shutdown = self._take_reading(ina)
+            self._last_tick = time.monotonic()
+            # Checked and set under the lock, as the refresh button can take a
+            # reading at the same time as the timer
+            start_shutdown = shutdown and not self._shutdown_emitted
+            if start_shutdown:
+                self._shutdown_emitted = True
 
         # Shutdown system, once, the readings carry on while it runs
-        if shutdown and not self._shutdown_emitted:
-            self._shutdown_emitted = True
+        if start_shutdown:
             self.logger.warning(
                 "Forcing system shutdown, going offline with %fV",
                 round(self.data.voltage, 2),
@@ -321,23 +358,11 @@ class Monitor:
             except OSError as error:
                 # An I2C read can fail with a loose connection or a busy bus.
                 # Skip this reading, rather than making a decision on stale
-                # values, and try again on the next tick. Logged once until a
-                # read works again, so a lasting fault doesn't flood the log.
-                self._read_failures += 1
-                if self._read_failures == 1:
-                    self.logger.error(  # noqa: TRY400
-                        "Unable to read the Red Reactor (%s), retrying every %ss",
-                        error,
-                        self._static_configuration["ina"]["monitor_interval"],
-                    )
+                # values, and try again on the next tick.
+                self._reading_failed(error)
                 return False
             else:
-                if self._read_failures:
-                    self.logger.warning(
-                        "Reading the Red Reactor again, after %i failed readings",
-                        self._read_failures,
-                    )
-                    self._read_failures = 0
+                self._reading_worked()
                 # INA219 current sign convention on the Red Reactor:
                 #   > 10 mA  -- discharging (no external power)
                 #   0-10 mA  -- float charge (battery full, power present)
@@ -366,6 +391,7 @@ class Monitor:
 
         if ina:
             self._report_if_pending()
+            self._report_if_changed()
 
         if (
             self.data.battery_level <= float(self.data.battery_warning_threshold)
@@ -378,7 +404,7 @@ class Monitor:
             self._empty_readings += 1
             if self._empty_readings == 1:
                 self.publish_event(POWER_EVENT_LOW_BATTERY)
-            shutdown = self._empty_readings >= DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS
+            shutdown = self._empty_readings >= self.data.shutdown_readings
             if not shutdown:
                 self.logger.warning(
                     "Battery at %i%% (%fV), at or below the %i%% warning threshold, "
@@ -387,12 +413,51 @@ class Monitor:
                     round(self.data.voltage, 2),
                     self.data.battery_warning_threshold,
                     self._empty_readings,
-                    DEFAULT_SHUTDOWN_CONSECUTIVE_READINGS,
+                    self.data.shutdown_readings,
                 )
         else:
             self._empty_readings = 0
 
         return shutdown
+
+    def _reading_failed(self, error: OSError) -> None:
+        """Count a failed read, reporting a sensor problem after several.
+
+        Logged once until a read works again, so a lasting fault doesn't flood
+        the log.
+        """
+        self._read_failures += 1
+        if self._read_failures == 1:
+            self.logger.error(  # noqa: TRY400
+                "Unable to read the Red Reactor (%s), retrying every %ss",
+                error,
+                self.data.monitor_interval,
+            )
+        if self._read_failures >= SENSOR_PROBLEM_READINGS and not (
+            self.data.sensor_problem
+        ):
+            # Send the readings as unknown, rather than leaving the last good
+            # ones in Home Assistant as if they were current
+            self.logger.error(  # noqa: TRY400
+                "%i Red Reactor readings in a row have failed, reporting a "
+                "sensor problem",
+                self._read_failures,
+            )
+            self.data.sensor_problem = True
+            self._update()
+
+    def _reading_worked(self) -> None:
+        """Clear the failed reads, and any sensor problem, after a good read."""
+        if not self._read_failures:
+            return
+        self.logger.warning(
+            "Reading the Red Reactor again, after %i failed readings",
+            self._read_failures,
+        )
+        self._read_failures = 0
+        if self.data.sensor_problem:
+            self.data.sensor_problem = False
+            self._update()
 
     def _set_external_power(
         self,
@@ -450,6 +515,33 @@ class Monitor:
             self._report_pending = False
 
         if pending:
+            self._update()
+
+    def _report_if_changed(self) -> None:
+        """Report straight away when the level or charging state has changed.
+
+        The battery level must have moved by `battery.report_level_change`
+        percentage points since the last report. The report interval carries
+        on as a heartbeat. Nothing is sent before the first report, or more
+        often than every REPORT_ON_CHANGE_MINIMUM_INTERVAL seconds.
+        """
+        if self._reported_level is None:
+            return
+        if time.monotonic() - self._reported_at < REPORT_ON_CHANGE_MINIMUM_INTERVAL:
+            return
+
+        level_change = float(
+            self._static_configuration.get("battery", {}).get(
+                "report_level_change",
+                DEFAULT_BATTERY_REPORT_LEVEL_CHANGE,
+            ),
+        )
+        level_changed = (
+            level_change > 0
+            and abs(self.data.battery_level - self._reported_level) >= level_change
+        )
+        if level_changed or self.data.charging != self._reported_charging:
+            self.logger.debug("Battery level or charging changed, reporting it")
             self._update()
 
     def _check_start_up_charge(self) -> None:
@@ -667,6 +759,9 @@ class Monitor:
             self.data.battery_time_remaining = self._calculate_battery_time_remaining()
 
             payload = json.dumps(self._state_payload())
+            self._reported_level = self.data.battery_level
+            self._reported_charging = self.data.charging
+            self._reported_at = time.monotonic()
 
         # The retained online status isn't sent with every report. MQTT sends
         # it on every connect, and the Last Will replaces it with offline if
@@ -687,6 +782,7 @@ class Monitor:
     def _state_payload(self) -> dict[str, Any]:
         """Return the state message, keyed by each field's configured name."""
         fields = self._static_configuration["fields"]
+        last_shutdown = self.data.last_shutdown or {}
         values: dict[str, Any] = {
             "voltage": round(self.data.voltage, 3),
             "current": published_current(self.data.current),
@@ -710,7 +806,29 @@ class Monitor:
             "report_interval": self.data.report_interval,
             "battery_capacity": self.data.battery_capacity,
             "battery_time_remaining": self.data.battery_time_remaining,
+            "monitor_interval": self.data.monitor_interval,
+            "average_readings": self.data.average_readings,
+            "shutdown_readings": self.data.shutdown_readings,
+            "sensor_problem": binary_payload(
+                fields["sensor_problem"],
+                self.data.sensor_problem,
+            ),
+            "last_shutdown": last_shutdown.get("reason"),
+            "last_shutdown_time": last_shutdown.get("time"),
+            "last_shutdown_voltage": last_shutdown.get("voltage"),
         }
+        if self.data.sensor_problem:
+            # The INA219 can't be read, so these would be the last good values
+            for key in (
+                "voltage",
+                "current",
+                "power",
+                "battery_level",
+                "external_power",
+                "charging",
+                "battery_time_remaining",
+            ):
+                values[key] = None
         return {str(fields[key]["name"]): value for key, value in values.items()}
 
     def _cpu_stat_payload(self, field: str, mask: int) -> str | None:
@@ -740,6 +858,18 @@ class Monitor:
             # Apply the new report interval straight away, rather than after
             # the tick that is already waiting on the old interval
             self.report_timer.set_interval(self.data.report_interval)
+
+        # Created after the first call, once the INA219 is set up
+        monitor_timer: RepeatTimer | None = getattr(self, "monitor_timer", None)
+        if monitor_timer is not None:
+            monitor_timer.set_interval(self.data.monitor_interval)
+
+        if self._battery_readings.maxlen != self.data.average_readings:
+            # Keeps the most recent readings that still fit
+            self._battery_readings = deque(
+                self._battery_readings,
+                maxlen=self.data.average_readings,
+            )
 
     def _mqtt_on_connect(
         self,

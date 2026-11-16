@@ -37,6 +37,7 @@ homeassistant:
 # battery:
 #   internal_resistance: 35 # mΩ, 0 turns the load correction off
 #   average_readings: 6 # Readings averaged for the battery level, 1 turns it off
+#   report_level_change: 5 # Level change (points) reported straight away, 0 turns it off
 #   curve: # [resting voltage, level %] pairs, left out uses a straight line
 #     # Example for a Samsung INR18650-35E, approximate, read off a 0.2A discharge chart
 #     - [2.80, 0]

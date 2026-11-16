@@ -604,3 +604,20 @@ def test_saved_migration_is_not_repeated(static_config, dynamic_config):
     homeassistant._update_homeassistant_configuration()
 
     assert published == [DEVICE_TOPIC]
+
+
+def test_discovery_includes_the_new_entities(homeassistant):
+    """The sensor problem, last shutdown, refresh and readings settings."""
+    components = homeassistant._device_discovery_payload()["components"]
+
+    assert components["sensor_problem"]["platform"] == "binary_sensor"
+    assert components["sensor_problem"]["device_class"] == "problem"
+    assert components["last_shutdown"]["platform"] == "sensor"
+    assert "state_class" not in components["last_shutdown"]
+    assert components["last_shutdown_time"]["device_class"] == "timestamp"
+    assert components["last_shutdown_voltage"]["unit_of_measurement"] == "V"
+    assert components["refresh"]["platform"] == "button"
+    assert components["refresh"]["command_topic"] == "redreactor/redreactor/set/refresh"
+    for name in ("monitor_interval", "average_readings", "shutdown_readings"):
+        assert components[name]["platform"] == "number"
+        assert components[name]["command_topic"].endswith(f"/set/{name}")

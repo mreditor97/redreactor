@@ -186,6 +186,69 @@ def static_config():
                 "device_class": "duration",
                 "suggested_display_precision": 1,
             },
+            "monitor_interval": {
+                "name": "monitor_interval",
+                "pretty": "Monitor interval",
+                "type": "number",
+                "unit": "s",
+                "entity_category": "diagnostic",
+                "min": 0.5,
+                "max": 300,
+                "mode": "box",
+                "step": 0.5,
+            },
+            "average_readings": {
+                "name": "average_readings",
+                "pretty": "Readings averaged",
+                "type": "number",
+                "entity_category": "diagnostic",
+                "min": 1,
+                "max": 100,
+                "mode": "box",
+                "step": 1,
+            },
+            "shutdown_readings": {
+                "name": "shutdown_readings",
+                "pretty": "Shutdown confirmation readings",
+                "type": "number",
+                "entity_category": "diagnostic",
+                "min": 1,
+                "max": 20,
+                "mode": "box",
+                "step": 1,
+            },
+            "sensor_problem": {
+                "name": "sensor_problem",
+                "pretty": "Sensor problem",
+                "type": "binary_sensor",
+                "device_class": "problem",
+                "entity_category": "diagnostic",
+            },
+            "last_shutdown": {
+                "name": "last_shutdown",
+                "pretty": "Last shutdown",
+                "type": "sensor",
+                "entity_category": "diagnostic",
+                "state_class": None,
+            },
+            "last_shutdown_time": {
+                "name": "last_shutdown_time",
+                "pretty": "Last shutdown time",
+                "type": "sensor",
+                "device_class": "timestamp",
+                "entity_category": "diagnostic",
+                "state_class": None,
+            },
+            "last_shutdown_voltage": {
+                "name": "last_shutdown_voltage",
+                "pretty": "Last shutdown voltage",
+                "type": "sensor",
+                "unit": "V",
+                "device_class": "voltage",
+                "entity_category": "diagnostic",
+                "state_class": None,
+                "suggested_display_precision": 2,
+            },
             "power_event": {
                 "name": "power_event",
                 "pretty": "Power event",
@@ -209,6 +272,12 @@ def static_config():
                 "type": "button",
                 "entity_category": "diagnostic",
             },
+            "refresh": {
+                "name": "refresh",
+                "pretty": "Refresh",
+                "type": "button",
+                "entity_category": "diagnostic",
+            },
         },
         "ina": {
             "address": 0x40,
@@ -222,6 +291,7 @@ def static_config():
             "internal_resistance": 0,
             "average_readings": 1,
             "curve": None,
+            "report_level_change": 5,
         },
         "system": {
             "shutdown": "sudo shutdown 0 -h",
@@ -238,7 +308,11 @@ def static_config():
 def dynamic_config(tmp_path):
     """Create a real DynamicConfiguration using a tmp_path JSON file."""
     dynamic_file = str(tmp_path / "dynamic.json")
-    return DynamicConfiguration(dynamic_file=dynamic_file)
+    # The settings the static_config fixture sets, as LinkedConfiguration does
+    return DynamicConfiguration(
+        dynamic_file=dynamic_file,
+        static_defaults={"monitor_interval": 5, "average_readings": 1},
+    )
 
 
 @pytest.fixture

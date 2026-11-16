@@ -220,7 +220,7 @@ def test_monitor_range_error_level_is_not_corrected(monitor, mock_ina):
 
 def test_battery_level_is_averaged(static_config, dynamic_config, mock_ina):
     """The level comes from the average of the last average_readings readings."""
-    static_config["battery"]["average_readings"] = 3
+    dynamic_config.data["average_readings"] = 3
     monitor = _make_monitor(static_config, dynamic_config, mock_ina)
 
     with patch.object(monitor, "_update"):
@@ -239,7 +239,7 @@ def test_battery_level_is_averaged(static_config, dynamic_config, mock_ina):
 
 def test_battery_average_includes_current(static_config, dynamic_config, mock_ina):
     """The current is averaged too, for the load correction."""
-    static_config["battery"]["average_readings"] = 2
+    dynamic_config.data["average_readings"] = 2
     static_config["battery"]["internal_resistance"] = 100
     monitor = _make_monitor(static_config, dynamic_config, mock_ina)
 

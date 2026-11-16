@@ -413,6 +413,9 @@ def test_linked_config_converts_quoted_new_options(tmp_path):
         ("battery: {average_readings: 101}", "`battery.average_readings`"),
         ("battery: {average_readings: 2.5}", "`battery.average_readings`"),
         ("battery: {internal_resistance: abc}", "`battery.internal_resistance`"),
+        ("battery: {report_level_change: -1}", "`battery.report_level_change`"),
+        ("battery: {report_level_change: 101}", "`battery.report_level_change`"),
+        ("battery: {report_level_change: yes}", "`battery.report_level_change`"),
     ],
 )
 def test_linked_config_rejects_invalid_new_options(tmp_path, contents, message):
@@ -562,3 +565,83 @@ def test_linked_config_adc_samples_default_is_single_sample(tmp_path):
     config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
 
     assert config.static["ina"]["adc_samples"] == 1
+
+
+def test_linked_config_report_level_change(tmp_path):
+    """The level change reported straight away defaults to 5, and can be set."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text("")
+    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+    assert config.static["battery"]["report_level_change"] == 5
+
+    static_file.write_text("battery: {report_level_change: '0'}")
+    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
+    assert config.static["battery"]["report_level_change"] == 0
+
+
+def test_static_settings_follow_the_static_file_until_changed(tmp_path):
+    """The monitor interval and readings averaged come from the static file.
+
+    They are only saved once changed from MQTT, so a later change to the
+    static file still applies, and setting one back hands it back.
+    """
+    static_file = tmp_path / "config.yaml"
+    dynamic_file = tmp_path / "dynamic.json"
+    static_file.write_text("ina: {monitor_interval: 2}")
+
+    config = LinkedConfiguration(str(static_file), str(dynamic_file))
+    assert config.dynamic.data["monitor_interval"] == 2
+    assert config.dynamic.data["average_readings"] == 6
+    assert config.dynamic.data["shutdown_readings"] == 3
+    saved = json.loads(dynamic_file.read_text())
+    assert "monitor_interval" not in saved
+    assert "average_readings" not in saved
+    # Not a static setting, so saved like the others
+    assert saved["shutdown_readings"] == 3
+
+    static_file.write_text("ina: {monitor_interval: 4}")
+    config = LinkedConfiguration(str(static_file), str(dynamic_file))
+    assert config.dynamic.data["monitor_interval"] == 4
+
+    config.dynamic.data["monitor_interval"] = 10
+    config.dynamic.write()
+    assert json.loads(dynamic_file.read_text())["monitor_interval"] == 10
+    config = LinkedConfiguration(str(static_file), str(dynamic_file))
+    assert config.dynamic.data["monitor_interval"] == 10
+
+    config.dynamic.data["monitor_interval"] = 4
+    config.dynamic.write()
+    assert "monitor_interval" not in json.loads(dynamic_file.read_text())
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "default"),
+    [
+        ("monitor_interval", 0, 5),
+        ("monitor_interval", "fast", 5),
+        ("average_readings", 0, 6),
+        ("shutdown_readings", 0, 3),
+        ("shutdown_readings", 21, 3),
+    ],
+)
+def test_linked_config_resets_invalid_reading_settings(tmp_path, key, value, default):
+    """An invalid saved readings setting falls back to its default."""
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text("")
+    dynamic_file = tmp_path / "dynamic.json"
+    dynamic_file.write_text(json.dumps({key: value}))
+
+    config = LinkedConfiguration(str(static_file), str(dynamic_file))
+
+    assert config.dynamic.data[key] == default
+
+
+def test_dynamic_config_keeps_the_last_shutdown(tmp_path):
+    """The saved last shutdown is kept as it is when the file is loaded."""
+    dynamic_file = tmp_path / "dynamic.json"
+    last_shutdown = {"reason": "Low battery", "voltage": 3.2}
+    dynamic_file.write_text(json.dumps({"last_shutdown": last_shutdown}))
+
+    config = DynamicConfiguration(dynamic_file=str(dynamic_file))
+
+    assert config.data["last_shutdown"] == last_shutdown

@@ -15,6 +15,9 @@ dependencies = [
   "pyyaml >= 6.0",
 ]
 
+[project.scripts]
+redreactor = "redreactor.__main__:main"
+
 [project.urls]
 Homepage = "https://github.com/mreditor97/redreactor"
 Documentation = "https://github.com/mreditor97/redreactor"

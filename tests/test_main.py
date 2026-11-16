@@ -132,3 +132,49 @@ def test_log_file_that_cannot_be_opened_uses_the_console(tmp_path, caplog):
 
     read_once.assert_called_once()
     assert "Unable to open the log file" in caplog.text
+
+
+def test_service_tells_systemd_it_is_ready_before_connecting(config_files):
+    """READY=1 is sent and the watchdog started once everything is set up."""
+    from redreactor import __main__
+
+    calls: list[str] = []
+    with (
+        patch.object(sys, "argv", config_files),
+        patch.object(__main__, "MQTT") as mqtt,
+        patch.object(__main__, "Monitor") as monitor,
+        patch.object(__main__, "Commander"),
+        patch.object(__main__, "Homeassistant"),
+        patch.object(__main__, "notify", side_effect=calls.append),
+        patch.object(__main__, "start_watchdog") as start_watchdog,
+    ):
+        mqtt.return_value.connect.side_effect = lambda *_: calls.append("connect")
+        __main__.main()
+
+    assert calls == ["READY=1", "connect"]
+    start_watchdog.assert_called_once_with(monitor.return_value.is_healthy)
+
+
+def test_invalid_log_level_is_reported(tmp_path, caplog):
+    """A log level that isn't one of the listed names is logged and ignored."""
+    from redreactor import __main__
+
+    static_file = tmp_path / "config.yaml"
+    static_file.write_text(yaml.dump({"logging": {"console": "LOUD"}}))
+    argv = ["redreactor", "--config", str(static_file), "--check"]
+    argv += ["--database", str(tmp_path / "db"), "--log", str(tmp_path / "log")]
+    with (
+        patch.object(sys, "argv", argv),
+        patch.object(__main__, "read_once", return_value={}),
+    ):
+        __main__.main()
+
+    assert "Invalid console log level 'LOUD'" in caplog.text
+
+
+def test_redreactor_command_is_installed():
+    """The package installs a `redreactor` command that runs main()."""
+    from importlib.metadata import entry_points
+
+    (command,) = entry_points(group="console_scripts", name="redreactor")
+    assert command.value == "redreactor.__main__:main"

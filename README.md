@@ -23,16 +23,23 @@ Functionality includes:
   - Battery Warning Threshold
   - Battery Voltage Minimum and Maximum
   - Report Interval
+  - Monitor Interval, Readings Averaged and Shutdown Confirmation Readings
+  - Sensor Problem, when the INA219 can't be read
+  - Last Shutdown reason, time and voltage
 - Commands:
   - Immediate Shutdown
   - Immediate Restart
   - Change the Battery Warning Threshold
   - Change the Battery Voltage Minimum and Maximum
   - Change the Report Interval
+  - Change the Monitor Interval, Readings Averaged and Shutdown Confirmation Readings
+  - Refresh, to read and report straight away
+- Reports straight away when the battery level moves by `battery.report_level_change` points, or charging starts or stops
 - Power events (power lost, power restored, low battery, shutdown started) for automations
 - Optional TLS for the MQTT connection
 - A `--check` option that reads the Red Reactor once and exits, to test the I2C setup
-- Provides `systemd` service example, so it can be started as a service on system boot
+- Provides `systemd` service example, so it can be started as a service on system boot, with the systemd watchdog restarting it if the readings stop
+- A `redreactor` command, so it can be installed with `uv tool install redreactor`
 
 If you haven't already got yourself a Red Reactor (An uninterruptible battery powered backup for your Raspberry Pi), one can be purchased from there [website](https://theredreactor.com).
 
@@ -71,7 +78,14 @@ Topic `redreactor/your-configured-hostname/state`
   "battery_voltage_maximum": 4.2,
   "report_interval": 30,
   "battery_capacity": 3000,
-  "battery_time_remaining": null
+  "battery_time_remaining": null,
+  "monitor_interval": 5,
+  "average_readings": 6,
+  "shutdown_readings": 3,
+  "sensor_problem": "OFF",
+  "last_shutdown": "Low battery",
+  "last_shutdown_time": "2026-11-10T20:36:00+00:00",
+  "last_shutdown_voltage": 3.212
 }
 ```
 
@@ -87,11 +101,16 @@ Topic `redreactor/your-configured-hostname/state`
 - `cpu_stat` read via `cat /sys/devices/platform/soc/soc:firmware/get_throttled` gets the CPU Stat in a human readable format
 - `under_voltage` is `ON` while the Raspberry Pi reports under-voltage now, from the same throttling state as `cpu_stat`. `null` when it can't be read
 - `throttled` is `ON` while the CPU is slowed down now: frequency capped, throttled, or at the soft temperature limit. `null` when it can't be read
-- `battery_warning_threshold` is the battery percentage at or below which, while running on battery, a safe shutdown of the device is started (after 3 consecutive readings, so a brief voltage dip doesn't trigger it). If the device starts up below this level while charging it stays on; without external power it shuts down again
+- `battery_warning_threshold` is the battery percentage at or below which, while running on battery, a safe shutdown of the device is started (after `shutdown_readings` consecutive readings, so a brief voltage dip doesn't trigger it). If the device starts up below this level while charging it stays on; without external power it shuts down again
 - `battery_voltage_minimum` is the voltage at which is to be considered the lowest allowable before initiating a safe shutdown
 - `battery_voltage_maximum` is the voltage at which is to be considered the maximum at which the battery can be (this is used in the calculation of the `battery_level`)
 - `report_interval` is the reporting interval at which the data will be published onto the **state** topic
 - `battery_capacity` is the total capacity of the batteries in mAh (with two cells in parallel, the sum of both), set it from Home Assistant or the command topic. `0` means not set
+- `monitor_interval` is the seconds between INA219 readings. Until it is changed from Home Assistant or the command topic it is `ina.monitor_interval` from the configuration file, and setting it back to that value hands it back to the file
+- `average_readings` is how many readings are averaged for `battery_level`, `battery.average_readings` from the configuration file until it is changed, like `monitor_interval`
+- `shutdown_readings` is how many readings in a row must be at or below `battery_warning_threshold`, on battery, before the shutdown starts (default `3`)
+- `sensor_problem` is `ON` after 3 INA219 reads in a row have failed (such as a loose connection). While it is on, `voltage`, `current`, `power`, `battery_level`, `external_power`, `charging` and `battery_time_remaining` are `null` (unknown in Home Assistant) rather than the last good readings. No low battery shutdown can happen while the battery can't be read
+- `last_shutdown` is why this service last shut down or restarted the device: `Low battery`, `Shutdown button` or `Restart button`. `last_shutdown_time` (UTC) and `last_shutdown_voltage` are when it happened and the battery voltage then. They are saved to the database file before the command runs, so a power cut or a shutdown from outside this service isn't recorded. `null` until the first one
 - `battery_time_remaining` is a rough estimate of the days left on battery before the low battery shutdown, from `battery_capacity`, `battery_level` above `battery_warning_threshold` and `current`. It is `null` (unknown in Home Assistant) while there is external power or `battery_capacity` is `0`. The battery level is worked out from the voltage, which isn't linear with the charge left, so treat it as a guide
 
 ### Status
@@ -117,8 +136,12 @@ Command topic | value:
 - `battery_voltage_maximum` | value (float)
 - `report_interval` | value (int)
 - `battery_capacity` | value (int, mAh, `0` to `20000`, `0` for not set)
+- `monitor_interval` | value (float, seconds, `0.5` to `300`)
+- `average_readings` | value (int, `1` to `100`)
+- `shutdown_readings` | value (int, `1` to `20`)
 - `restart` | no value required
 - `shutdown` | no value required
+- `refresh` | no value required, takes a reading and reports it straight away
 
 ## Configuration
 
@@ -143,6 +166,7 @@ Command topic | value:
 - `battery.internal_resistance` is the battery's internal resistance in mΩ (default `35`, `0` turns it off), see [Battery level](#battery-level)
 - `battery.average_readings` is how many monitor readings are averaged for `battery_level` (default `6`, 30 seconds at the default `ina.monitor_interval`, `1` turns it off), see [Battery level](#battery-level)
 - `battery.curve` maps the battery's resting voltage to its level, see [Battery level](#battery-level)
+- `battery.report_level_change` is how many percentage points `battery_level` must move since the last report to be reported straight away, rather than at the next `report_interval` (default `5`, `0` turns it off). Charging starting or stopping is always reported straight away. These reports are sent at most every 10 seconds, and `report_interval` carries on as a heartbeat
 - `fields.<field>.name` is used in the MQTT topics and the state JSON, so it must be letters, digits and `_`, not starting with a digit
 - `fields.<field>.default_entity_id` sets the entity ID Home Assistant creates the entity with, for example `sensor.ups_voltage`. The older `object_id` option still works but is deprecated by Home Assistant
 
@@ -192,7 +216,22 @@ The log file is rotated at 1 MB, keeping 3 old files.
 To check the Red Reactor can be read, without connecting to MQTT:
 
 ```shell
-python -m redreactor --config /etc/redreactor/config.yaml --check
+redreactor --config /etc/redreactor/config.yaml --check
 ```
+
+### Installing with uv
+
+The package installs a `redreactor` command, the same as `python -m redreactor`. [uv](https://docs.astral.sh/uv/) can install it in its own environment:
+
+```shell
+uv tool install redreactor
+redreactor --config /etc/redreactor/config.yaml
+```
+
+`uv tool upgrade redreactor` updates it. The I2C bus must be enabled, and the user running it needs access to `/dev/i2c-1` (on Raspberry Pi OS, membership of the `i2c` group).
+
+### systemd
+
+`extras/redreactor.service` runs it as a `Type=notify` service with `WatchdogSec=60`. The service tells systemd once it has started, and pings the watchdog every 30 seconds while the battery readings are being taken. If the readings stop (for example an I2C read that never returns), the pings stop and systemd restarts the service. The readings count as stopped after two monitor intervals plus 30 seconds without one. Outside systemd none of this happens, and nothing extra is needed. With an older unit file without `Type=notify` it runs as before.
 
 If there are more features that you would like to see supported, let me know!
