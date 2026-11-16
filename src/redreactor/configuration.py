@@ -811,6 +811,9 @@ class LinkedConfiguration:
                 },
                 "monitor_interval": {
                     "name": "monitor_interval",
+                    # Hidden until enabled in Home Assistant, to keep the device
+                    # page short
+                    "enabled_by_default": False,
                     "pretty": "Monitor interval",
                     "type": "number",
                     "unit": "s",
@@ -822,6 +825,9 @@ class LinkedConfiguration:
                 },
                 "average_readings": {
                     "name": "average_readings",
+                    # Hidden until enabled in Home Assistant, to keep the device
+                    # page short
+                    "enabled_by_default": False,
                     "pretty": "Readings averaged",
                     "type": "number",
                     "entity_category": "diagnostic",
@@ -832,6 +838,9 @@ class LinkedConfiguration:
                 },
                 "shutdown_readings": {
                     "name": "shutdown_readings",
+                    # Hidden until enabled in Home Assistant, to keep the device
+                    # page short
+                    "enabled_by_default": False,
                     "pretty": "Shutdown confirmation readings",
                     "type": "number",
                     "entity_category": "diagnostic",
@@ -864,6 +873,9 @@ class LinkedConfiguration:
                 },
                 "last_shutdown_time": {
                     "name": "last_shutdown_time",
+                    # Hidden until enabled in Home Assistant, to keep the device
+                    # page short
+                    "enabled_by_default": False,
                     "pretty": "Last shutdown time",
                     "type": "sensor",
                     "device_class": "timestamp",
@@ -872,6 +884,9 @@ class LinkedConfiguration:
                 },
                 "last_shutdown_voltage": {
                     "name": "last_shutdown_voltage",
+                    # Hidden until enabled in Home Assistant, to keep the device
+                    # page short
+                    "enabled_by_default": False,
                     "pretty": "Last shutdown voltage",
                     "type": "sensor",
                     "unit": "V",

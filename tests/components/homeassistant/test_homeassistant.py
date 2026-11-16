@@ -247,6 +247,17 @@ def test_discovery_includes_power_and_charging(homeassistant):
     assert charging["value_template"] == "{{ value_json.charging }}"
 
 
+def test_discovery_sends_enabled_by_default(static_config, dynamic_config):
+    """A field's enabled_by_default is sent, and fields without it are enabled."""
+    from redreactor.components.homeassistant import Homeassistant
+
+    static_config["fields"]["monitor_interval"]["enabled_by_default"] = False
+    components = _components(Homeassistant(static_config, dynamic_config))
+
+    assert components["monitor_interval"]["enabled_by_default"] is False
+    assert components["voltage"]["enabled_by_default"] is True
+
+
 def test_discovery_includes_under_voltage_and_throttled(homeassistant):
     """Under-voltage and throttling are diagnostic problem binary sensors."""
     components = _components(homeassistant)
