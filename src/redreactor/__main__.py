@@ -55,8 +55,8 @@ def main() -> None:
     args = get_arguments()
 
     logger = logging.getLogger("Red Reactor")
-    # Prevent INA219's internal logger (which shares the root logger) from
-    # duplicating our messages up the hierarchy.
+    # Keep our messages to our own handlers, rather than also passing them up
+    # to any root logger a library sets up.
     logger.propagate = False
     # Root level is INFO so all handlers receive every message; each handler
     # then applies its own level from the config file (set below).

@@ -206,7 +206,7 @@ def test_monitor_uses_current_for_battery_level(monitor, mock_ina):
 
 def test_monitor_range_error_level_is_not_corrected(monitor, mock_ina):
     """On a range error the real current is unknown, so no correction is made."""
-    from ina219 import DeviceRangeError
+    from redreactor.helpers.ina219 import DeviceRangeError
 
     monitor._static_configuration["battery"]["internal_resistance"] = 100
     mock_ina.voltage.return_value = 3.5
@@ -289,7 +289,7 @@ def test_monitor_negative_current_sets_external_power_true(monitor, mock_ina):
 
 def test_monitor_device_range_error_sets_external_power_false(monitor, mock_ina):
     """DeviceRangeError sets external_power=False and current to the INA maximum."""
-    from ina219 import DeviceRangeError
+    from redreactor.helpers.ina219 import DeviceRangeError
 
     monitor.data.external_power = True
     mock_ina.voltage.side_effect = DeviceRangeError(6000)
@@ -303,9 +303,8 @@ def test_monitor_device_range_error_sets_external_power_false(monitor, mock_ina)
 
 def test_monitor_device_range_error_stays_online(monitor, mock_ina):
     """An overcurrent reading publishes state immediately and never `offline`."""
-    from ina219 import DeviceRangeError
-
     from redreactor.components.mqtt import MQTT
+    from redreactor.helpers.ina219 import DeviceRangeError
 
     published: list[tuple[str, str]] = []
     MQTT.event.on(
@@ -939,7 +938,7 @@ def test_low_battery_event_is_sent_once(monitor, mock_ina):
 
 def test_device_range_error_sends_power_lost(monitor, mock_ina):
     """An over-current reading counts as power lost after the first reading."""
-    from ina219 import DeviceRangeError
+    from redreactor.helpers.ina219 import DeviceRangeError
 
     events = _events()
 
@@ -958,7 +957,7 @@ def test_device_range_error_sends_power_lost(monitor, mock_ina):
 
 def test_device_range_error_estimates_power(monitor, mock_ina):
     """Power is worked out from the capped current instead of left stale."""
-    from ina219 import DeviceRangeError
+    from redreactor.helpers.ina219 import DeviceRangeError
 
     monitor.data.power = 99.0
     mock_ina.voltage.return_value = 4.0
@@ -1249,11 +1248,10 @@ def test_setting_change_applies_through_write_event(monitor, dynamic_config):
     ("samples", "setting"),
     [(1, 3), (2, 9), (4, 10), (8, 11), (16, 12), (32, 13), (64, 14), (128, 15)],
 )
-def test_ina_adc_setting_matches_pi_ina219(samples, setting):
-    """Each sample count maps to pi-ina219's ADC constant."""
-    from ina219 import INA219
-
+def test_ina_adc_setting_matches_driver(samples, setting):
+    """Each sample count maps to the INA219 driver's ADC constant."""
     from redreactor.components.monitor.monitor import ina_adc_setting
+    from redreactor.helpers.ina219 import INA219
 
     names = {1: "ADC_12BIT"} | {n: f"ADC_{n}SAMP" for n in (2, 4, 8, 16, 32, 64, 128)}
     assert ina_adc_setting(samples) == setting == getattr(INA219, names[samples])
