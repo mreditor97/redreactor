@@ -4,7 +4,8 @@
 
 - under the Home Assistant Supervisor, its API (see `supervisor`)
 - running as root, `shutdown 0 -h` or `shutdown 0 -r`
-- otherwise the same through `sudo`, which needs a sudoers entry for the user
+- otherwise the same through `sudo -n`, which needs a sudoers entry for the
+  user. `-n` fails straight away without one, rather than asking for a password
 
 A command that is set is run as it is, apart from an `ha host` command under
 the Supervisor, which is sent to its API so the `ha` CLI isn't needed.
@@ -78,5 +79,5 @@ def power_method(
 
     arguments: tuple[str, ...] = ("shutdown", "0", flag)
     if os.geteuid() != ROOT_UID:
-        arguments = ("sudo", *arguments)
+        arguments = ("sudo", "-n", *arguments)
     return PowerMethod(command=arguments, automatic=True)

@@ -143,12 +143,13 @@ def test_service_tells_systemd_it_is_ready_before_connecting(config_files):
         patch.object(sys, "argv", config_files),
         patch.object(__main__, "MQTT") as mqtt,
         patch.object(__main__, "Monitor") as monitor,
-        patch.object(__main__, "Commander"),
+        patch.object(__main__, "Commander") as commander,
         patch.object(__main__, "Homeassistant"),
         patch.object(__main__, "notify", side_effect=calls.append),
         patch.object(__main__, "start_watchdog") as start_watchdog,
     ):
         mqtt.return_value.connect.side_effect = lambda *_: calls.append("connect")
+        commander.return_value.power_command_failed = False
         __main__.main()
 
     assert calls == ["READY=1", "connect"]
@@ -178,3 +179,25 @@ def test_redreactor_command_is_installed():
 
     (command,) = entry_points(group="console_scripts", name="redreactor")
     assert command.value == "redreactor.__main__:main"
+
+
+@pytest.mark.parametrize(("failed", "code"), [(True, 3), (False, None)])
+def test_failed_shutdown_exits_non_zero(config_files, failed, code):
+    """A shutdown that didn't work exits 3, so the service is started again."""
+    from redreactor import __main__
+
+    with (
+        patch.object(sys, "argv", config_files),
+        patch.object(__main__, "MQTT"),
+        patch.object(__main__, "Monitor"),
+        patch.object(__main__, "Homeassistant"),
+        patch.object(__main__, "_notify_systemd"),
+        patch.object(__main__, "Commander") as commander,
+    ):
+        commander.return_value.power_command_failed = failed
+        if code is None:
+            __main__.main()
+        else:
+            with pytest.raises(SystemExit) as exit_info:
+                __main__.main()
+            assert exit_info.value.code == code

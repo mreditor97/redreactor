@@ -81,6 +81,11 @@ HOURS_PER_DAY = 24
 COMMAND_PAYLOAD_MAXIMUM = 64
 # Seconds a shutdown or restart command may run before it is given up on
 SYSTEM_COMMAND_TIMEOUT = 60
+# Exit code when the shutdown or restart didn't work. Non-zero so systemd
+# (Restart=on-failure) starts the service again, and a low battery shutdown is
+# tried again once the low readings are counted. The app restarts it on this
+# code instead of halting
+EXIT_POWER_COMMAND_FAILED = 3
 
 # INA219 reads in a row that must fail before the readings are sent as
 # unknown instead of the last good ones

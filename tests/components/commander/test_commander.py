@@ -359,7 +359,25 @@ def test_on_command_logs_failed_system_command(commander):
         mock_run.return_value.returncode = 1
         cmd._on_command("shutdown")
 
-    mock_error.assert_called_once()
+    messages = [call.args[0] for call in mock_error.call_args_list]
+    assert "failed with exit code" in messages[0]
+    assert "started again" in messages[1]
+    assert cmd.power_command_failed
+
+
+def test_on_command_that_works_is_not_a_failure(commander):
+    """A command that exits 0 lets the program exit normally."""
+    cmd, _ = commander
+    from redreactor.components.mqtt import MQTT
+
+    MQTT.event.on("publish", lambda **_: None)
+
+    target = "redreactor.components.commander.commander.subprocess.run"
+    with patch(target) as mock_run, patch("time.sleep"):
+        mock_run.return_value.returncode = 0
+        cmd._on_command("shutdown")
+
+    assert not cmd.power_command_failed
 
 
 def test_on_command_logs_missing_system_command(commander):
@@ -381,6 +399,7 @@ def test_on_command_logs_missing_system_command(commander):
 
     mock_exception.assert_called_once()
     assert disconnect_calls == [True]
+    assert cmd.power_command_failed
 
 
 def test_on_message_matches_renamed_field_name(static_config, dynamic_config):
@@ -553,8 +572,9 @@ def test_on_command_unsplittable_command_still_disconnects(
         cmd._on_command("shutdown")
 
     mock_run.assert_not_called()
-    assert "can't be split" in mock_error.call_args.args[0]
+    assert "can't be split" in mock_error.call_args_list[0].args[0]
     assert disconnect_calls == [True]
+    assert cmd.power_command_failed
 
 
 def test_on_command_hanging_command_times_out(commander):
@@ -581,8 +601,9 @@ def test_on_command_hanging_command_times_out(commander):
         cmd._on_command("restart")
 
     assert mock_run.call_args.kwargs["timeout"] == SYSTEM_COMMAND_TIMEOUT
-    assert "did not finish" in mock_error.call_args.args[0]
+    assert "did not finish" in mock_error.call_args_list[0].args[0]
     assert disconnect_calls == [True]
+    assert cmd.power_command_failed
 
 
 # ---------------------------------------------------------------------------
@@ -625,6 +646,32 @@ def test_supervisor_host_command_uses_the_api(  # noqa: PLR0913, PLR0917
 
     mock_call.assert_called_once_with(action, "secret", 60)
     mock_run.assert_not_called()
+
+
+@pytest.mark.parametrize("accepted", [True, False])
+def test_supervisor_refusal_is_a_failure(
+    static_config,
+    dynamic_config,
+    monkeypatch,
+    accepted,
+):
+    """A host action the Supervisor didn't accept exits to be started again."""
+    from redreactor.components.commander.commander import Commander
+    from redreactor.components.mqtt import MQTT
+
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "secret")
+    static_config["system"]["shutdown"] = ""
+    cmd = Commander(static_config, dynamic_config, MagicMock())
+    MQTT.event.on("publish", lambda **_: None)
+
+    module = "redreactor.components.commander.commander"
+    with (
+        patch(f"{module}.supervisor.call_host_action", return_value=accepted),
+        patch("time.sleep"),
+    ):
+        cmd._on_command("shutdown")
+
+    assert cmd.power_command_failed is not accepted
 
 
 def test_other_commands_run_under_the_supervisor(commander, monkeypatch):
