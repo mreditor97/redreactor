@@ -1,4 +1,4 @@
-"""Tests for the Monitor's settable readings, sensor problem and reports."""
+"""Tests for the Monitor's shutdown readings, failed readings and reports."""
 
 from __future__ import annotations
 
@@ -44,48 +44,14 @@ def _fail_reading(monitor, mock_ina):
 
 
 # ---------------------------------------------------------------------------
-# Settings changed from Home Assistant
+# Shutdown readings
 # ---------------------------------------------------------------------------
 
 
-def test_monitor_interval_comes_from_the_static_configuration(monitor):
-    """Until it is changed from Home Assistant, the static value is used."""
-    assert monitor.data.monitor_interval == 5
-    assert monitor.monitor_timer.interval == 5
-
-
-def test_monitor_interval_change_is_applied(monitor, dynamic_config, published):
-    """A new monitor interval changes the timer straight away and is reported."""
-    dynamic_config.data["monitor_interval"] = 2.5
-    dynamic_config.event.emit("write")
-
-    assert monitor.monitor_timer.interval == 2.5
-    assert published[-1]["monitor_interval"] == 2.5
-
-
-def test_average_readings_change_keeps_the_recent_readings(
-    monitor,
-    dynamic_config,
-    mock_ina,
-):
-    """Fewer readings averaged keeps the most recent ones."""
-    dynamic_config.data["average_readings"] = 3
-    monitor._update_dynamic_configuration()
-    with patch.object(monitor, "_update"):
-        for voltage in (3.3, 3.5, 3.7):
-            _run_monitor_with_ina(monitor, mock_ina, voltage, 500.0)
-
-    dynamic_config.data["average_readings"] = 2
-    monitor._update_dynamic_configuration()
-
-    assert monitor._battery_readings.maxlen == 2
-    assert [voltage for voltage, _ in monitor._battery_readings] == [3.5, 3.7]
-
-
-def test_shutdown_readings_setting_is_used(monitor, dynamic_config, mock_ina):
-    """The shutdown waits for the set number of low readings."""
-    dynamic_config.data["shutdown_readings"] = 5
-    monitor._update_dynamic_configuration()
+def test_shutdown_readings_setting_is_used(static_config, dynamic_config, mock_ina):
+    """The shutdown waits for battery.shutdown_readings low readings."""
+    static_config["battery"]["shutdown_readings"] = 5
+    monitor = _make_monitor(static_config, dynamic_config, mock_ina)
     shutdowns: list[bool] = []
     monitor.event.on("shutdown", lambda: shutdowns.append(True))
 
@@ -98,38 +64,27 @@ def test_shutdown_readings_setting_is_used(monitor, dynamic_config, mock_ina):
     assert shutdowns == [True]
 
 
-def test_settings_are_in_the_state(monitor, published):
-    """The settable readings values are reported for Home Assistant."""
-    monitor._update()
-
-    assert published[-1]["monitor_interval"] == 5
-    assert published[-1]["average_readings"] == 1
-    assert published[-1]["shutdown_readings"] == 3
-
-
 # ---------------------------------------------------------------------------
-# Sensor problem
+# Failed readings
 # ---------------------------------------------------------------------------
 
 
-def test_sensor_problem_after_failed_readings(monitor, mock_ina, published):
-    """Readings that keep failing are reported as unknown, with the problem."""
+def test_failed_readings_are_reported_as_unknown(monitor, mock_ina, published):
+    """Readings that keep failing are reported as unknown."""
     _run_monitor_with_ina(monitor, mock_ina, 3.7, 50.0)
     monitor._update()
-    assert published[-1]["sensor_problem"] == "OFF"
     assert published[-1]["voltage"] == 3.7
 
     for _ in range(SENSOR_PROBLEM_READINGS - 1):
         _fail_reading(monitor, mock_ina)
-    assert not monitor.data.sensor_problem
+    assert not monitor._sensor_problem
 
     reports = len(published)
     _fail_reading(monitor, mock_ina)
 
-    assert monitor.data.sensor_problem
+    assert monitor._sensor_problem
     assert len(published) == reports + 1
     state = published[-1]
-    assert state["sensor_problem"] == "ON"
     for name in (
         "voltage",
         "current",
@@ -146,16 +101,15 @@ def test_sensor_problem_after_failed_readings(monitor, mock_ina, published):
     assert len(published) == reports + 1
 
 
-def test_sensor_problem_clears_when_reading_works(monitor, mock_ina, published):
-    """A good reading clears the problem and is reported straight away."""
+def test_readings_are_reported_again_when_reading_works(monitor, mock_ina, published):
+    """A good reading after the failures is reported straight away."""
     for _ in range(SENSOR_PROBLEM_READINGS):
         _fail_reading(monitor, mock_ina)
     mock_ina.voltage.side_effect = None
 
     _run_monitor_with_ina(monitor, mock_ina, 3.7, 50.0)
 
-    assert not monitor.data.sensor_problem
-    assert published[-1]["sensor_problem"] == "OFF"
+    assert not monitor._sensor_problem
     assert published[-1]["voltage"] == 3.7
 
 
@@ -234,77 +188,8 @@ def test_level_change_can_be_turned_off(static_config, dynamic_config, mock_ina)
 
 
 # ---------------------------------------------------------------------------
-# Last shutdown, refresh and the watchdog health check
+# The watchdog health check
 # ---------------------------------------------------------------------------
-
-
-def test_last_shutdown_is_reported(static_config, dynamic_config, mock_ina):
-    """The shutdown saved before this start is reported."""
-    from redreactor.components.mqtt import MQTT
-
-    dynamic_config.data["last_shutdown"] = {
-        "reason": "Low battery",
-        "action": "shutdown",
-        "voltage": 3.21,
-        "battery_level": 2,
-        "time": "2026-11-10T20:36:00+00:00",
-    }
-    monitor = _make_monitor(static_config, dynamic_config, mock_ina)
-    published: dict[str, str] = {}
-    MQTT.event.on(
-        "publish",
-        lambda topic, payload, **_: published.__setitem__(topic, payload),
-    )
-
-    monitor._update()
-
-    state = json.loads(published[STATE_TOPIC])
-    assert state["last_shutdown"] == "Low battery"
-    assert state["last_shutdown_time"] == "2026-11-10T20:36:00+00:00"
-    assert state["last_shutdown_voltage"] == 3.21
-
-
-@pytest.mark.parametrize("saved", [None, "Low battery", ["Low battery"]])
-def test_no_or_invalid_last_shutdown_is_unknown(
-    static_config,
-    dynamic_config,
-    mock_ina,
-    saved,
-):
-    """Without a saved shutdown, or with one that isn't valid, it is unknown."""
-    if saved is not None:
-        dynamic_config.data["last_shutdown"] = saved
-    monitor = _make_monitor(static_config, dynamic_config, mock_ina)
-
-    state = monitor._state_payload()
-
-    assert state["last_shutdown"] is None
-    assert state["last_shutdown_time"] is None
-    assert state["last_shutdown_voltage"] is None
-
-
-def test_refresh_reads_and_reports(monitor, mock_ina, published):
-    """The refresh button takes a reading and reports it."""
-    mock_ina.voltage.return_value = 3.8
-    mock_ina.current.return_value = 50.0
-
-    monitor.refresh()
-
-    assert published[-1]["voltage"] == 3.8
-
-
-def test_refresh_starts_the_shutdown_once(monitor, mock_ina):
-    """A refresh at the last low reading starts the shutdown, only once."""
-    shutdowns: list[bool] = []
-    monitor.event.on("shutdown", lambda: shutdowns.append(True))
-    mock_ina.voltage.return_value = 2.9
-    mock_ina.current.return_value = 500.0
-
-    with patch.object(monitor, "_update"):
-        for _ in range(5):
-            monitor.refresh()
-
-    assert shutdowns == [True]
 
 
 def test_is_healthy_while_readings_are_taken(monitor, mock_ina):

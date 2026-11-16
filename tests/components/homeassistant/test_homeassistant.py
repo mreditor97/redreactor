@@ -50,12 +50,13 @@ def test_on_connect_subscribes_to_birth_topic(homeassistant):
     client = MagicMock()
 
     with (
-        patch.object(homeassistant, "_update_homeassistant_configuration"),
+        patch.object(homeassistant, "_update_homeassistant_configuration") as update,
         patch.object(homeassistant.configuration_report_timer, "start"),
     ):
         homeassistant._mqtt_on_connect(client, None, None, None)
 
     client.subscribe.assert_called_once_with(topic="homeassistant/status")
+    update.assert_called_once_with(remove_old=True)
 
 
 def test_birth_message_republishes_discovery(homeassistant):
@@ -70,7 +71,8 @@ def test_birth_message_republishes_discovery(homeassistant):
             _message("homeassistant/status", b"online"),
         )
 
-    update.assert_called_once()
+    # Home Assistant is listening now, so removed entities are deleted too
+    update.assert_called_once_with(remove_old=True)
 
 
 def test_birth_message_resends_latest_readings(homeassistant):
@@ -146,7 +148,7 @@ def test_other_messages_do_not_republish_discovery(homeassistant, topic, payload
 DEVICE_TOPIC = "homeassistant/device/redreactor_redreactor/config"
 
 
-def _published(homeassistant, *, migrated=True):
+def _published(homeassistant, *, migrated=True, remove_old=False):
     """Run a discovery update and return what was published, in order."""
     from redreactor.components.mqtt import MQTT
 
@@ -156,7 +158,7 @@ def _published(homeassistant, *, migrated=True):
         lambda topic, payload, **kwargs: published.append((topic, payload, kwargs)),
     )
     homeassistant._migrated = migrated
-    homeassistant._update_homeassistant_configuration()
+    homeassistant._update_homeassistant_configuration(remove_old=remove_old)
     return published
 
 
@@ -251,10 +253,10 @@ def test_discovery_sends_enabled_by_default(static_config, dynamic_config):
     """A field's enabled_by_default is sent, and fields without it are enabled."""
     from redreactor.components.homeassistant import Homeassistant
 
-    static_config["fields"]["monitor_interval"]["enabled_by_default"] = False
+    static_config["fields"]["power"]["enabled_by_default"] = False
     components = _components(Homeassistant(static_config, dynamic_config))
 
-    assert components["monitor_interval"]["enabled_by_default"] is False
+    assert components["power"]["enabled_by_default"] is False
     assert components["voltage"]["enabled_by_default"] is True
 
 
@@ -376,11 +378,14 @@ def test_first_discovery_migrates_the_old_entity_topics(homeassistant, static_co
         f"homeassistant/{field['type']}/redreactor_redreactor_{field['name']}/config"
         for field in static_config["fields"].values()
     ]
-    removed = "homeassistant/sensor/redreactor_redreactor_cpu_stat_raw/config"
+    removed = [
+        "homeassistant/sensor/redreactor_redreactor_cpu_stat_raw/config",
+        "homeassistant/sensor/redreactor_redreactor_cpu_stat/config",
+    ]
 
-    # The removed raw CPU stat sensor is deleted, the rest are migrated
-    assert published[0] == (removed, "", {})
-    assert published[1:] == [
+    # The removed CPU stat sensors are deleted, the rest are migrated
+    assert published[:2] == [(topic, "", {}) for topic in removed]
+    assert published[2:] == [
         (topic, json.dumps({"migrate_discovery": True}), {}) for topic in legacy
     ]
     assert homeassistant._migrated is True
@@ -484,9 +489,19 @@ def test_discovery_topic_is_valid_for_any_hostname(
 # ---------------------------------------------------------------------------
 
 
-def test_expire_after_kept_when_longer_than_two_reports(homeassistant):
-    """The default 30 second report interval keeps the configured 120 seconds."""
+def test_expire_after_kept_when_longer_than_two_reports(static_config, dynamic_config):
+    """A 30 second report interval keeps the configured 120 seconds."""
+    from redreactor.components.homeassistant import Homeassistant
+
+    dynamic_config.data["report_interval"] = 30
+    homeassistant = Homeassistant(static_config, dynamic_config)
+
     assert _components(homeassistant)["voltage"]["expire_after"] == 120
+
+
+def test_expire_after_for_the_default_report_interval(homeassistant):
+    """The default 60 second report interval expires after 2 reports and 30 s."""
+    assert _components(homeassistant)["voltage"]["expire_after"] == 150
 
 
 def test_expire_after_raised_for_a_long_report_interval(
@@ -617,18 +632,46 @@ def test_saved_migration_is_not_repeated(static_config, dynamic_config):
     assert published == [DEVICE_TOPIC]
 
 
-def test_discovery_includes_the_new_entities(homeassistant):
-    """The sensor problem, last shutdown, refresh and readings settings."""
-    components = homeassistant._device_discovery_payload()["components"]
+def test_connect_deletes_removed_components(homeassistant):
+    """Removed entities are sent with only their platform, then the usual message."""
+    import json
 
-    assert components["sensor_problem"]["platform"] == "binary_sensor"
-    assert components["sensor_problem"]["device_class"] == "problem"
-    assert components["last_shutdown"]["platform"] == "sensor"
-    assert "state_class" not in components["last_shutdown"]
-    assert components["last_shutdown_time"]["device_class"] == "timestamp"
-    assert components["last_shutdown_voltage"]["unit_of_measurement"] == "V"
-    assert components["refresh"]["platform"] == "button"
-    assert components["refresh"]["command_topic"] == "redreactor/redreactor/set/refresh"
-    for name in ("monitor_interval", "average_readings", "shutdown_readings"):
-        assert components[name]["platform"] == "number"
-        assert components[name]["command_topic"].endswith(f"/set/{name}")
+    from redreactor.components.homeassistant.homeassistant import REMOVED_COMPONENTS
+
+    published = _published(homeassistant, migrated=True, remove_old=True)
+
+    assert [topic for topic, _, _ in published] == [DEVICE_TOPIC, DEVICE_TOPIC]
+    removal = json.loads(published[0][1])["components"]
+    for entity_type, name in REMOVED_COMPONENTS:
+        assert removal[name] == {"platform": entity_type}
+    assert "voltage" in removal
+    # The follow up message no longer lists them
+    components = json.loads(published[1][1])["components"]
+    assert not {name for _, name in REMOVED_COMPONENTS} & set(components)
+
+
+def test_removed_component_configured_again_is_kept(static_config, dynamic_config):
+    """A field configured under a removed name isn't deleted."""
+    import json
+
+    from redreactor.components.homeassistant import Homeassistant
+
+    static_config["fields"]["refresh"] = {
+        "name": "refresh",
+        "pretty": "Refresh",
+        "type": "button",
+    }
+    homeassistant = Homeassistant(static_config, dynamic_config)
+    published = _published(homeassistant, migrated=True, remove_old=True)
+
+    assert json.loads(published[0][1])["components"]["refresh"]["platform"] == (
+        "button"
+    )
+    assert "command_topic" in json.loads(published[0][1])["components"]["refresh"]
+
+
+def test_timer_republish_does_not_send_removals(homeassistant):
+    """The regular discovery republish only sends the device discovery once."""
+    published = _published(homeassistant, migrated=True)
+
+    assert [topic for topic, _, _ in published] == [DEVICE_TOPIC]

@@ -18,7 +18,6 @@ from redreactor.helpers.cpu_utils import (
     FREQ_CAPPED_BIT,
     SOFT_TEMP_LIMIT_BIT,
     UNDER_VOLTAGE_BIT,
-    decode_cpu_stat_text,
     find_cpu_thermal_zone,
     read_cpu_stat,
     read_cpu_stat_inferred,
@@ -308,7 +307,6 @@ def test_inferred_hassos_pi_under_voltage(sysfs):
     _hwmon(sysfs, 1, "rpi_volt", {"in0_lcrit_alarm": "1"})
     _cpufreq(sysfs, 1800000, 1800000)
     assert read_cpu_stat() == 1 << UNDER_VOLTAGE_BIT
-    assert decode_cpu_stat_text(1 << UNDER_VOLTAGE_BIT) == "Under-voltage NOW"
 
 
 def test_inferred_freq_capped(sysfs):
@@ -372,32 +370,6 @@ def test_read_cpu_stat_prefers_vcgencmd_over_inferred(fake_vcgencmd):
     _cpufreq(fake_vcgencmd.parent.parent, 900000, 1000000)
     with patch("subprocess.run", return_value=MagicMock(stdout="throttled=0x0\n")):
         assert read_cpu_stat() == 0
-
-
-# ---------------------------------------------------------------------------
-# decode_cpu_stat_text
-# ---------------------------------------------------------------------------
-
-
-def test_decode_cpu_stat_text_zero_is_ok():
-    """A bitmask of 0 decodes to 'OK'."""
-    assert decode_cpu_stat_text(0) == "OK"
-
-
-def test_decode_cpu_stat_text_all_current_bits():
-    """All current bits set produce all NOW messages."""
-    result = decode_cpu_stat_text(0b1111)
-    assert "Under-voltage NOW" in result
-    assert "Frequency capped NOW" in result
-    assert "Throttled NOW" in result
-    assert "Soft temp limit NOW" in result
-
-
-def test_decode_cpu_stat_text_historical_bits():
-    """Historical bits (offset +16) decode to OCCURRED messages."""
-    result = decode_cpu_stat_text((1 << 16) | (1 << 18))
-    assert "Under-voltage OCCURRED" in result
-    assert "Throttling OCCURRED" in result
 
 
 # ---------------------------------------------------------------------------

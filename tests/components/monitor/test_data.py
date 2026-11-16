@@ -32,7 +32,6 @@ def test_monitor_data_custom_values():
         external_power=False,
         cpu_temperature=55.0,
         cpu_stat_raw=4,
-        cpu_stat_text="Throttled NOW",
         battery_warning_threshold=15,
         battery_voltage_minimum=3.0,
         battery_voltage_maximum=4.1,
@@ -44,7 +43,6 @@ def test_monitor_data_custom_values():
     assert data.external_power is False
     assert data.cpu_temperature == 55.0
     assert data.cpu_stat_raw == 4
-    assert data.cpu_stat_text == "Throttled NOW"
     assert data.battery_warning_threshold == 15
     assert data.battery_voltage_minimum == 3.0
     assert data.battery_voltage_maximum == 4.1

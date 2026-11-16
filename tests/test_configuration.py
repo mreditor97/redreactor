@@ -285,6 +285,9 @@ def test_linked_config_accepts_example_config(tmp_path):
         ("mqtt: {transport: bogus}\n", "`mqtt.transport`"),
         ("mqtt: {timeout: 70000}\n", "`mqtt.timeout`"),
         ("ina: {monitor_interval: 0.001}\n", "`ina.monitor_interval`"),
+        ("battery: {shutdown_readings: 0}\n", "`battery.shutdown_readings`"),
+        ("battery: {shutdown_readings: 21}\n", "`battery.shutdown_readings`"),
+        ("battery: {shutdown_readings: 2.5}\n", "`battery.shutdown_readings`"),
         ("ina: {monitor_interval: 1.0e+300}\n", "`ina.monitor_interval`"),
         (
             "homeassistant: {discovery_interval: 0.001}\n",
@@ -348,31 +351,9 @@ def test_linked_config_new_defaults(tmp_path):
     assert config.static["fields"]["under_voltage"]["entity_category"] == "diagnostic"
     assert config.static["fields"]["throttled"]["device_class"] == "problem"
     assert config.static["fields"]["power_event"]["type"] == "event"
-
-
-def test_linked_config_disables_rarely_used_entities(tmp_path):
-    """The entities added for the new features start disabled in Home Assistant."""
-    static_file = tmp_path / "config.yaml"
-    static_file.write_text(yaml.dump({"hostname": {"name": "garage-pi"}}))
-
-    config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
-
-    disabled = {
-        key
-        for key, field in config.static["fields"].items()
-        if field.get("enabled_by_default") is False
-    }
-    assert disabled == {
-        "monitor_interval",
-        "average_readings",
-        "shutdown_readings",
-        "last_shutdown_time",
-        "last_shutdown_voltage",
-        "sensor_problem",
-        "last_shutdown",
-        "refresh",
-    }
     assert config.static["mqtt"]["topic"]["event"] == "event"
+    assert "cpu_stat_text" not in config.static["fields"]
+    assert config.static["battery"]["shutdown_readings"] == 3
     assert config.static["mqtt"]["user"] == ""
     assert config.static["mqtt"]["password"] == ""
     assert (
@@ -601,71 +582,3 @@ def test_linked_config_report_level_change(tmp_path):
     static_file.write_text("battery: {report_level_change: '0'}")
     config = LinkedConfiguration(str(static_file), str(tmp_path / "dynamic.json"))
     assert config.static["battery"]["report_level_change"] == 0
-
-
-def test_static_settings_follow_the_static_file_until_changed(tmp_path):
-    """The monitor interval and readings averaged come from the static file.
-
-    They are only saved once changed from MQTT, so a later change to the
-    static file still applies, and setting one back hands it back.
-    """
-    static_file = tmp_path / "config.yaml"
-    dynamic_file = tmp_path / "dynamic.json"
-    static_file.write_text("ina: {monitor_interval: 2}")
-
-    config = LinkedConfiguration(str(static_file), str(dynamic_file))
-    assert config.dynamic.data["monitor_interval"] == 2
-    assert config.dynamic.data["average_readings"] == 6
-    assert config.dynamic.data["shutdown_readings"] == 3
-    saved = json.loads(dynamic_file.read_text())
-    assert "monitor_interval" not in saved
-    assert "average_readings" not in saved
-    # Not a static setting, so saved like the others
-    assert saved["shutdown_readings"] == 3
-
-    static_file.write_text("ina: {monitor_interval: 4}")
-    config = LinkedConfiguration(str(static_file), str(dynamic_file))
-    assert config.dynamic.data["monitor_interval"] == 4
-
-    config.dynamic.data["monitor_interval"] = 10
-    config.dynamic.write()
-    assert json.loads(dynamic_file.read_text())["monitor_interval"] == 10
-    config = LinkedConfiguration(str(static_file), str(dynamic_file))
-    assert config.dynamic.data["monitor_interval"] == 10
-
-    config.dynamic.data["monitor_interval"] = 4
-    config.dynamic.write()
-    assert "monitor_interval" not in json.loads(dynamic_file.read_text())
-
-
-@pytest.mark.parametrize(
-    ("key", "value", "default"),
-    [
-        ("monitor_interval", 0, 5),
-        ("monitor_interval", "fast", 5),
-        ("average_readings", 0, 6),
-        ("shutdown_readings", 0, 3),
-        ("shutdown_readings", 21, 3),
-    ],
-)
-def test_linked_config_resets_invalid_reading_settings(tmp_path, key, value, default):
-    """An invalid saved readings setting falls back to its default."""
-    static_file = tmp_path / "config.yaml"
-    static_file.write_text("")
-    dynamic_file = tmp_path / "dynamic.json"
-    dynamic_file.write_text(json.dumps({key: value}))
-
-    config = LinkedConfiguration(str(static_file), str(dynamic_file))
-
-    assert config.dynamic.data[key] == default
-
-
-def test_dynamic_config_keeps_the_last_shutdown(tmp_path):
-    """The saved last shutdown is kept as it is when the file is loaded."""
-    dynamic_file = tmp_path / "dynamic.json"
-    last_shutdown = {"reason": "Low battery", "voltage": 3.2}
-    dynamic_file.write_text(json.dumps({"last_shutdown": last_shutdown}))
-
-    config = DynamicConfiguration(dynamic_file=str(dynamic_file))
-
-    assert config.data["last_shutdown"] == last_shutdown
