@@ -13,7 +13,10 @@ def no_supervisor(monkeypatch):
     monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
 
 
-@pytest.mark.parametrize(("event_type", "action"), [("shutdown", "shutdown"), ("restart", "reboot")])
+@pytest.mark.parametrize(
+    ("event_type", "action"),
+    [("shutdown", "shutdown"), ("restart", "reboot")],
+)
 @pytest.mark.parametrize("command", [None, "", "   "])
 def test_automatic_under_the_supervisor(monkeypatch, event_type, action, command):
     """Left empty under the Supervisor, its API is used."""
